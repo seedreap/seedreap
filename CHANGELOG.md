@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/seedreap/seedreap/compare/v0.1.0...v0.2.0) (2025-12-05)
+
+
+### Features
+
+* remove old ssh connection and other dead code ([#24](https://github.com/seedreap/seedreap/issues/24)) ([a25a189](https://github.com/seedreap/seedreap/commit/a25a18911bd7ad290b8266f73223e05f585f9a2c))
+
 ## 0.1.0 (2025-12-05)
 
 
