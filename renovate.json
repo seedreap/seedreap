@@ -1,6 +1,42 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
+    "config:recommended",
+    ":automergeStableNonMajor",
+    ":semanticCommits",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "labels": [
+    "dependencies"
+  ],
+  "postUpdateOptions": [
+    "gomodTidy",
+    "gomodUpdateImportPaths"
+  ],
+  "packageRules": [
+    {
+      "groupName": "go opentelemetry packages and libraries",
+      "groupSlug": "opentelemetry-go and libraries",
+      "matchDatasources": [
+        "go"
+      ],
+      "matchPackagePrefixes": [
+        "go.opentelemetry.io/"
+      ]
+    },
+    {
+      "description": "Auto-merge GitHub Actions",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "automerge": true,
+      "automergeType": "pr",
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
+      "minimumReleaseAge": "3 days"
+    }
   ]
 }

@@ -1,4 +1,4 @@
-<h1 align="center"><img src="images/logo.png" alt="SeedReap Logo" width="200"></h1>
+<h1 align="center"><img src="docs/images/logo.png" alt="SeedReap Logo" width="200"></h1>
 
 # SeedReap
 
@@ -62,7 +62,7 @@ docker pull ghcr.io/seedreap/seedreap:latest
 
 ### 2. Configure
 
-Create a config file based on the [example configuration](config.example.yaml):
+Create a config file based on the [example configuration](https://seedreap.github.io/seedreap/configuration/#example-configuration):
 
 ```bash
 cp config.example.yaml config.yaml
@@ -70,7 +70,7 @@ cp config.example.yaml config.yaml
 ```
 
 Alternatively, SeedReap can be configured entirely using environment variables - no config file needed.
-See [Environment Variables](docs/configuration/environment-variables.md) for details.
+See [Environment Variables](https://seedreap.github.io/seedreap/configuration/environment-variables/) for details.
 
 ### 3. Run
 
@@ -82,19 +82,33 @@ The web UI will be available at `http://localhost:8423`.
 
 ## Documentation
 
-| Topic                                                                | Description                        |
-| -------------------------------------------------------------------- | ---------------------------------- |
-| [Installation](docs/getting-started/installation.md)                 | Detailed installation instructions |
-| [Quick Start](docs/getting-started/quickstart.md)                    | Get up and running quickly         |
-| [Configuration](docs/configuration/index.md)                         | Full configuration reference       |
-| [Environment Variables](docs/configuration/environment-variables.md) | Configure entirely via env vars    |
-| [Apps (Sonarr/Radarr)](docs/configuration/apps.md)                   | Setting up *arr app integration    |
-| [Downloaders](docs/configuration/downloaders.md)                     | Configuring download clients       |
-| [Web UI](docs/ui.md)                                                 | Understanding the dashboard        |
-| [API Reference](docs/api.md)                                         | REST API documentation             |
-| [Docker Deployment](docs/deployment/docker.md)                       | Running with Docker                |
-| [Kubernetes Deployment](docs/deployment/kubernetes.md)               | Kubernetes/Helm setup              |
-| [Extending](docs/development/extending.md)                           | Adding new downloaders or apps     |
+Full documentation is available at **[seedreap.github.io/seedreap](https://seedreap.github.io/seedreap/)**.
+
+| Topic                 | Description                        |
+| --------------------- | ---------------------------------- |
+| [Installation]        | Detailed installation instructions |
+| [Quick Start]         | Get up and running quickly         |
+| [Configuration]       | Full configuration reference       |
+| [Environment Vars]    | Configure entirely via env vars    |
+| [Apps (Sonarr/Radarr)]| Setting up *arr app integration    |
+| [Downloaders]         | Configuring download clients       |
+| [Web UI]              | Understanding the dashboard        |
+| [API Reference]       | REST API documentation             |
+| [Docker Deployment]   | Running with Docker                |
+| [Kubernetes]          | Kubernetes/Helm setup              |
+| [Extending]           | Adding new downloaders or apps     |
+
+[Installation]: https://seedreap.github.io/seedreap/getting-started/installation/
+[Quick Start]: https://seedreap.github.io/seedreap/getting-started/quickstart/
+[Configuration]: https://seedreap.github.io/seedreap/configuration/
+[Environment Vars]: https://seedreap.github.io/seedreap/configuration/environment-variables/
+[Apps (Sonarr/Radarr)]: https://seedreap.github.io/seedreap/configuration/apps/
+[Downloaders]: https://seedreap.github.io/seedreap/configuration/downloaders/
+[Web UI]: https://seedreap.github.io/seedreap/ui/
+[API Reference]: https://seedreap.github.io/seedreap/api/
+[Docker Deployment]: https://seedreap.github.io/seedreap/deployment/docker/
+[Kubernetes]: https://seedreap.github.io/seedreap/deployment/kubernetes/
+[Extending]: https://seedreap.github.io/seedreap/development/extending/
 
 ## Requirements
 
