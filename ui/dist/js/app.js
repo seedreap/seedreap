@@ -2,6 +2,8 @@
 
 import m from 'mithril';
 import { refresh, initialFetch } from './api.js';
+import { initTheme } from './state.js';
+import { POLL_INTERVAL } from './config.js';
 
 import Layout from './components/Layout.js';
 import Dashboard from './pages/Dashboard.js';
@@ -19,13 +21,16 @@ function withLayout(PageComponent) {
 
 // Initialize app
 async function init() {
+    // Initialize theme from preferences/system
+    initTheme();
+
     // Initial data fetch (includes apps, downloaders, speed history)
     await initialFetch();
 
-    // Start polling every 3 seconds
+    // Start polling
     setInterval(() => {
         refresh();
-    }, 3000);
+    }, POLL_INTERVAL);
 }
 
 // Initialize and set up routes

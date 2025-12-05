@@ -4,6 +4,7 @@ package server
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/seedreap/seedreap/internal/config"
+	testutil "github.com/seedreap/seedreap/internal/testing"
 )
 
 // loadConfigFromYAML creates a temp config file and loads it using config.Load().
@@ -34,6 +36,20 @@ func loadConfigFromYAML(t *testing.T, yaml string) config.Config {
 	return cfg
 }
 
+// loadConfigFromYAMLWithSSH creates temp SSH files and substitutes placeholders in the YAML.
+// Placeholders: {{KEY_FILE}} and {{KNOWN_HOSTS_FILE}}.
+func loadConfigFromYAMLWithSSH(t *testing.T, yaml string) config.Config {
+	t.Helper()
+
+	sshFiles := testutil.CreateTestSSHFiles(t)
+
+	// Replace placeholders with actual paths
+	yaml = strings.ReplaceAll(yaml, "{{KEY_FILE}}", sshFiles.KeyFile)
+	yaml = strings.ReplaceAll(yaml, "{{KNOWN_HOSTS_FILE}}", sshFiles.KnownHostsFile)
+
+	return loadConfigFromYAML(t, yaml)
+}
+
 func TestServerNew_DefaultsApplied(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -50,7 +66,7 @@ downloaders:
     ssh:
       host: seedbox.example.com
       user: seeduser
-      keyFile: /path/to/key
+      keyFile: {{KEY_FILE}}
       ignoreHostKey: true
 `,
 			check: func(t *testing.T, _ *Server, cfg config.Config) {
@@ -69,7 +85,7 @@ downloaders:
       host: seedbox.example.com
       port: 2222
       user: seeduser
-      keyFile: /path/to/key
+      keyFile: {{KEY_FILE}}
       ignoreHostKey: true
 `,
 			check: func(t *testing.T, _ *Server, cfg config.Config) {
@@ -114,7 +130,7 @@ sync:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := loadConfigFromYAML(t, tt.yaml)
+			cfg := loadConfigFromYAMLWithSSH(t, tt.yaml)
 
 			opts := Options{
 				Logger: zerolog.Nop(),
@@ -147,7 +163,7 @@ downloaders:
     ssh:
       host: seedbox.example.com
       user: seeduser
-      keyFile: /path/to/key
+      keyFile: {{KEY_FILE}}
       ignoreHostKey: true
 
 apps:
@@ -158,7 +174,7 @@ apps:
     category: tv-sonarr
 `
 
-	cfg := loadConfigFromYAML(t, yaml)
+	cfg := loadConfigFromYAMLWithSSH(t, yaml)
 
 	// Verify the config has empty downloadsPath for the app
 	assert.Empty(t, cfg.Apps["sonarr"].DownloadsPath,
@@ -191,7 +207,7 @@ downloaders:
     ssh:
       host: seedbox.example.com
       user: seeduser
-      keyFile: /path/to/key
+      keyFile: {{KEY_FILE}}
       ignoreHostKey: true
 
 apps:
@@ -203,7 +219,7 @@ apps:
     downloadsPath: /custom/tv/path
 `
 
-	cfg := loadConfigFromYAML(t, yaml)
+	cfg := loadConfigFromYAMLWithSSH(t, yaml)
 
 	assert.Equal(t, "/custom/tv/path", cfg.Apps["sonarr"].DownloadsPath,
 		"explicit downloadsPath should be preserved")
@@ -230,7 +246,7 @@ downloaders:
     ssh:
       host: seedbox1.example.com
       user: user1
-      keyFile: /path/to/key1
+      keyFile: {{KEY_FILE}}
       ignoreHostKey: true
   seedbox2:
     type: qbittorrent
@@ -238,7 +254,7 @@ downloaders:
     ssh:
       host: seedbox2.example.com
       user: user2
-      keyFile: /path/to/key2
+      keyFile: {{KEY_FILE}}
       ignoreHostKey: true
 
 apps:
@@ -258,7 +274,7 @@ apps:
     category: misc
 `
 
-	cfg := loadConfigFromYAML(t, yaml)
+	cfg := loadConfigFromYAMLWithSSH(t, yaml)
 
 	opts := Options{
 		Logger: zerolog.Nop(),
@@ -345,7 +361,7 @@ apps:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := loadConfigFromYAML(t, tt.yaml)
+			cfg := loadConfigFromYAMLWithSSH(t, tt.yaml)
 
 			app := cfg.Apps["sonarr"]
 			assert.Equal(t, tt.expectedCleanupCategory, app.CleanupOnCategoryChange)
@@ -363,6 +379,8 @@ apps:
 }
 
 func TestServerNew_UnknownDownloaderType(t *testing.T) {
+	sshFiles := testutil.CreateTestSSHFiles(t)
+
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "config.yaml")
 	yaml := `
@@ -373,7 +391,7 @@ downloaders:
     ssh:
       host: seedbox.example.com
       user: seeduser
-      keyFile: /path/to/key
+      keyFile: ` + sshFiles.KeyFile + `
       ignoreHostKey: true
 `
 	err := os.WriteFile(configFile, []byte(yaml), 0644)
@@ -418,11 +436,11 @@ downloaders:
     ssh:
       host: seedbox.example.com
       user: seeduser
-      keyFile: /path/to/key
+      keyFile: {{KEY_FILE}}
       ignoreHostKey: true
 `
 
-	cfg := loadConfigFromYAML(t, yaml)
+	cfg := loadConfigFromYAMLWithSSH(t, yaml)
 
 	opts := Options{
 		Logger: zerolog.Nop(),
@@ -448,7 +466,7 @@ apps:
     category: tv-sonarr
 `
 
-	cfg := loadConfigFromYAML(t, yaml)
+	cfg := loadConfigFromYAMLWithSSH(t, yaml)
 
 	opts := Options{
 		Logger: zerolog.Nop(),
@@ -473,7 +491,7 @@ downloaders:
     ssh:
       host: seedbox.example.com
       user: seeduser
-      keyFile: /path/to/key
+      keyFile: {{KEY_FILE}}
       ignoreHostKey: true
 
 apps:
@@ -485,7 +503,7 @@ apps:
     cleanupOnRemove: true
 `
 
-	cfg := loadConfigFromYAML(t, yaml)
+	cfg := loadConfigFromYAMLWithSSH(t, yaml)
 
 	opts := Options{
 		Logger: zerolog.Nop(),
@@ -510,7 +528,7 @@ sync:
   syncingPath: /downloads/syncing
 `
 
-	cfg := loadConfigFromYAML(t, yaml)
+	cfg := loadConfigFromYAMLWithSSH(t, yaml)
 
 	opts := Options{
 		Logger: zerolog.Nop(),
@@ -540,11 +558,11 @@ downloaders:
     ssh:
       host: seedbox.example.com
       user: seeduser
-      keyFile: /path/to/key
+      keyFile: {{KEY_FILE}}
       ignoreHostKey: true
 `
 
-	cfg := loadConfigFromYAML(t, yaml)
+	cfg := loadConfigFromYAMLWithSSH(t, yaml)
 
 	opts := Options{
 		Logger: zerolog.Nop(),
@@ -572,7 +590,7 @@ apps:
     category: misc
 `
 
-	cfg := loadConfigFromYAML(t, yaml)
+	cfg := loadConfigFromYAMLWithSSH(t, yaml)
 
 	opts := Options{
 		Logger: zerolog.Nop(),
@@ -628,7 +646,7 @@ apps:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := loadConfigFromYAML(t, tt.yaml)
+			cfg := loadConfigFromYAMLWithSSH(t, tt.yaml)
 
 			opts := Options{
 				Logger: zerolog.Nop(),
@@ -667,8 +685,8 @@ downloaders:
       host: seedbox.example.com
       port: 2222
       user: seeduser
-      keyFile: /path/to/key
-      knownHostsFile: /path/to/known_hosts
+      keyFile: {{KEY_FILE}}
+      knownHostsFile: {{KNOWN_HOSTS_FILE}}
 
 apps:
   sonarr:
@@ -689,7 +707,7 @@ apps:
     downloadsPath: /downloads/misc
 `
 
-	cfg := loadConfigFromYAML(t, yaml)
+	cfg := loadConfigFromYAMLWithSSH(t, yaml)
 
 	opts := Options{
 		Logger: zerolog.Nop(),

@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"strings"
@@ -192,9 +193,77 @@ var validTransferBackends = map[string]bool{
 	"rclone": true,
 }
 
+// validateURLScheme checks that a URL uses http or https scheme.
+func validateURLScheme(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return err
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("url must use http or https scheme, got %q", u.Scheme)
+	}
+	return nil
+}
+
+// rcloneSpecialChars are characters that could be used for injection in rclone connection strings.
+const rcloneSpecialChars = ",=:;'\""
+
+// validateSSHParam checks that an SSH parameter doesn't contain rclone special characters.
+func validateSSHParam(name, value string) error {
+	if strings.ContainsAny(value, rcloneSpecialChars) {
+		return fmt.Errorf("%s contains invalid characters (cannot contain %q)", name, rcloneSpecialChars)
+	}
+	return nil
+}
+
+// validateSSHKeyFile checks that an SSH key file exists and has secure permissions.
+func validateSSHKeyFile(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("ssh key file does not exist: %s", path)
+		}
+		return fmt.Errorf("cannot access ssh key file: %w", err)
+	}
+
+	if info.IsDir() {
+		return fmt.Errorf("ssh key file is a directory: %s", path)
+	}
+
+	// Check permissions - should be 0600 or 0400 (owner read/write or read-only)
+	mode := info.Mode().Perm()
+	// Allow 0600, 0400, and slight variations that still restrict group/other access
+	const maxAllowedPerm = fs.FileMode(0600)
+	if mode&0077 != 0 {
+		return fmt.Errorf("ssh key file has insecure permissions %04o (should be 0600 or 0400): %s", mode, path)
+	}
+	if mode > maxAllowedPerm {
+		return fmt.Errorf("ssh key file has insecure permissions %04o (should be 0600 or 0400): %s", mode, path)
+	}
+
+	return nil
+}
+
+// validateKnownHostsFile checks that a known_hosts file exists.
+func validateKnownHostsFile(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("known_hosts file does not exist: %s", path)
+		}
+		return fmt.Errorf("cannot access known_hosts file: %w", err)
+	}
+
+	if info.IsDir() {
+		return fmt.Errorf("known_hosts file is a directory: %s", path)
+	}
+
+	return nil
+}
+
 // validate checks that the configuration is valid.
 //
-//nolint:gocognit // validation requires checking many fields
+//nolint:gocognit,gocyclo,cyclop // validation requires checking many fields
 func validate(cfg *Config) error {
 	var errs []error
 
@@ -208,19 +277,32 @@ func validate(cfg *Config) error {
 
 		if dl.URL == "" {
 			errs = append(errs, fmt.Errorf("downloader %q: url is required", name))
-		} else if _, err := url.Parse(dl.URL); err != nil {
-			errs = append(errs, fmt.Errorf("downloader %q: invalid url: %w", name, err))
+		} else if err := validateURLScheme(dl.URL); err != nil {
+			errs = append(errs, fmt.Errorf("downloader %q: %w", name, err))
 		}
 
 		// SSH config is required for file transfers
 		if dl.SSH.Host == "" {
 			errs = append(errs, fmt.Errorf("downloader %q: ssh.host is required", name))
+		} else if err := validateSSHParam("ssh.host", dl.SSH.Host); err != nil {
+			errs = append(errs, fmt.Errorf("downloader %q: %w", name, err))
 		}
+
 		if dl.SSH.User == "" {
 			errs = append(errs, fmt.Errorf("downloader %q: ssh.user is required", name))
+		} else if err := validateSSHParam("ssh.user", dl.SSH.User); err != nil {
+			errs = append(errs, fmt.Errorf("downloader %q: %w", name, err))
 		}
+
 		if dl.SSH.KeyFile == "" {
 			errs = append(errs, fmt.Errorf("downloader %q: ssh.keyFile is required", name))
+		} else {
+			if err := validateSSHParam("ssh.keyFile", dl.SSH.KeyFile); err != nil {
+				errs = append(errs, fmt.Errorf("downloader %q: %w", name, err))
+			}
+			if err := validateSSHKeyFile(dl.SSH.KeyFile); err != nil {
+				errs = append(errs, fmt.Errorf("downloader %q: %w", name, err))
+			}
 		}
 
 		// Host key verification: must specify knownHostsFile OR ignoreHostKey, but not both
@@ -231,6 +313,14 @@ func validate(cfg *Config) error {
 		if dl.SSH.KnownHostsFile == "" && !dl.SSH.IgnoreHostKey {
 			errs = append(errs, fmt.Errorf(
 				"downloader %q: ssh.knownHostsFile is required (or set ssh.ignoreHostKey to true)", name))
+		}
+		if dl.SSH.KnownHostsFile != "" {
+			if err := validateSSHParam("ssh.knownHostsFile", dl.SSH.KnownHostsFile); err != nil {
+				errs = append(errs, fmt.Errorf("downloader %q: %w", name, err))
+			}
+			if err := validateKnownHostsFile(dl.SSH.KnownHostsFile); err != nil {
+				errs = append(errs, fmt.Errorf("downloader %q: %w", name, err))
+			}
 		}
 	}
 
@@ -250,8 +340,8 @@ func validate(cfg *Config) error {
 		if app.Type != "passthrough" {
 			if app.URL == "" {
 				errs = append(errs, fmt.Errorf("app %q: url is required", name))
-			} else if _, err := url.Parse(app.URL); err != nil {
-				errs = append(errs, fmt.Errorf("app %q: invalid url: %w", name, err))
+			} else if err := validateURLScheme(app.URL); err != nil {
+				errs = append(errs, fmt.Errorf("app %q: %w", name, err))
 			}
 
 			if app.APIKey == "" {

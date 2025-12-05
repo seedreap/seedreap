@@ -1,5 +1,53 @@
 // Application state management
 
+import { THEMES, DEFAULT_THEME_PREFERENCE, STORAGE_KEYS } from './config.js';
+
+// Theme state
+// preference: 'system' | 'light' | 'dark'
+// resolved: actual DaisyUI theme name applied
+export const theme = {
+    preference: localStorage.getItem(STORAGE_KEYS.themePreference) || DEFAULT_THEME_PREFERENCE,
+    resolved: THEMES.dark, // Will be set by initTheme()
+};
+
+// Get the system's color scheme preference
+function getSystemTheme() {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+// Resolve preference to actual theme name
+function resolveTheme(preference) {
+    const mode = preference === 'system' ? getSystemTheme() : preference;
+    return mode === 'dark' ? THEMES.dark : THEMES.light;
+}
+
+// Apply theme to document
+function applyTheme(themeName) {
+    document.documentElement.setAttribute('data-theme', themeName);
+    theme.resolved = themeName;
+}
+
+// Initialize theme system
+export function initTheme() {
+    // Apply initial theme
+    const resolved = resolveTheme(theme.preference);
+    applyTheme(resolved);
+
+    // Listen for system theme changes
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+        if (theme.preference === 'system') {
+            applyTheme(resolveTheme('system'));
+        }
+    });
+}
+
+// Set theme preference
+export function setThemePreference(preference) {
+    theme.preference = preference;
+    localStorage.setItem(STORAGE_KEYS.themePreference, preference);
+    applyTheme(resolveTheme(preference));
+}
+
 // Connection status
 export const connection = {
     status: 'connecting', // 'connecting', 'connected', 'disconnected'
@@ -38,10 +86,10 @@ export const timeline = {
 // Filter state
 export const filters = {
     search: '',
-    status: new Set(JSON.parse(localStorage.getItem('filterStatus') || '[]')),
-    apps: new Set(JSON.parse(localStorage.getItem('filterApps') || '[]')),
-    categories: new Set(JSON.parse(localStorage.getItem('filterCategories') || '[]')),
-    downloaders: new Set(JSON.parse(localStorage.getItem('filterDownloaders') || '[]')),
+    status: new Set(JSON.parse(localStorage.getItem(STORAGE_KEYS.filterStatus) || '[]')),
+    apps: new Set(JSON.parse(localStorage.getItem(STORAGE_KEYS.filterApps) || '[]')),
+    categories: new Set(JSON.parse(localStorage.getItem(STORAGE_KEYS.filterCategories) || '[]')),
+    downloaders: new Set(JSON.parse(localStorage.getItem(STORAGE_KEYS.filterDownloaders) || '[]')),
 };
 
 // Status order for sorting (lower = earlier in workflow)
@@ -67,10 +115,10 @@ export const fileStatusOrder = {
 
 // Filter persistence
 export function saveFilters() {
-    localStorage.setItem('filterStatus', JSON.stringify([...filters.status]));
-    localStorage.setItem('filterApps', JSON.stringify([...filters.apps]));
-    localStorage.setItem('filterCategories', JSON.stringify([...filters.categories]));
-    localStorage.setItem('filterDownloaders', JSON.stringify([...filters.downloaders]));
+    localStorage.setItem(STORAGE_KEYS.filterStatus, JSON.stringify([...filters.status]));
+    localStorage.setItem(STORAGE_KEYS.filterApps, JSON.stringify([...filters.apps]));
+    localStorage.setItem(STORAGE_KEYS.filterCategories, JSON.stringify([...filters.categories]));
+    localStorage.setItem(STORAGE_KEYS.filterDownloaders, JSON.stringify([...filters.downloaders]));
 }
 
 // Clear all filters

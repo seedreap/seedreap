@@ -121,6 +121,20 @@ Apache 2.0 - See [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
+### Inspiration
+
 - [seedsync](https://github.com/ipsingh06/seedsync) - The original inspiration for this project
-- [Sonarr](https://sonarr.tv/) / [Radarr](https://radarr.video/) - Media management applications
-- [rclone](https://rclone.org/) - Cloud storage sync tool (via Go libraries)
+
+### Web UI
+
+- [Mithril.js](https://mithril.js.org/) - Lightweight JavaScript framework
+- [DaisyUI](https://daisyui.com/) - Tailwind CSS component library
+- [Tailwind CSS](https://tailwindcss.com/) - Utility-first CSS framework
+
+### Go Libraries
+
+- [rclone](https://rclone.org/) - Cloud storage sync (SFTP transfers)
+- [Echo](https://echo.labstack.com/) - HTTP framework
+- [Cobra](https://cobra.dev/) - CLI framework
+- [Viper](https://github.com/spf13/viper) - Configuration management
+- [zerolog](https://github.com/rs/zerolog) - Structured logging

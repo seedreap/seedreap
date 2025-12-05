@@ -29,11 +29,23 @@ const FilterDropdown = {
             return m('span.text-xs.text-base-content/50', label);
         }
 
-        return m('.dropdown', [
-            m('div.btn.btn-xs.btn-ghost.gap-1', {
-                tabindex: 0,
-                role: 'button'
-            }, [
+        // Using details/summary with backdrop for mobile close support
+        return m('details.dropdown', {
+            oncreate: (vnode) => {
+                // Close dropdown when clicking outside
+                vnode.state.closeHandler = (e) => {
+                    if (vnode.dom.open && !vnode.dom.contains(e.target)) {
+                        vnode.dom.open = false;
+                    }
+                };
+                document.addEventListener('click', vnode.state.closeHandler);
+            },
+            onremove: (vnode) => {
+                document.removeEventListener('click', vnode.state.closeHandler);
+            }
+        }, [
+            // Dropdown button
+            m('summary.btn.btn-xs.btn-ghost.gap-1', [
                 label,
                 hasFilters && m('span.badge.badge-xs.badge-primary', filterSet.size),
                 m('svg.w-3.h-3', {
@@ -44,13 +56,11 @@ const FilterDropdown = {
                     'stroke-width': '2'
                 }, m('path', { d: 'M6 9l6 6 6-6' }))
             ]),
-            m('ul.dropdown-content.menu.bg-base-100.rounded-box.z-50.p-2.shadow-xl.border.border-base-300.max-h-64.overflow-y-auto', {
-                tabindex: 0,
-                class: getBadgeClass ? 'w-56' : 'w-48'
-            }, [
+            // Dropdown content - flex-col ensures single column layout
+            m('ul.dropdown-content.bg-base-100.rounded-box.z-50.w-56.p-2.shadow-xl.border.border-base-300.max-h-64.overflow-y-auto.flex.flex-col.gap-1', [
                 // Clear button when filters are active
-                hasFilters && m('li.menu-title', [
-                    m('button.btn.btn-xs.btn-block', {
+                hasFilters && m('li', [
+                    m('button.btn.btn-xs.btn-block.btn-ghost', {
                         onclick: (e) => {
                             e.stopPropagation();
                             filterSet.clear();
@@ -64,7 +74,7 @@ const FilterDropdown = {
                     const badgeClass = getBadgeClass ? getBadgeClass(value) : null;
 
                     return m('li', { key: value }, [
-                        m('label.flex.items-center.gap-2.cursor-pointer', [
+                        m('label.flex.items-center.gap-2.cursor-pointer.py-1.px-2.rounded.hover:bg-base-300', [
                             m('input.checkbox.checkbox-xs', {
                                 type: 'checkbox',
                                 checked: filterSet.has(value),
@@ -72,7 +82,7 @@ const FilterDropdown = {
                             }),
                             badgeClass
                                 ? m('span.badge.badge-sm.whitespace-nowrap', { class: badgeClass }, displayLabel)
-                                : m('span.text-sm.truncate', displayLabel)
+                                : m('span.text-sm', displayLabel)
                         ])
                     ]);
                 })

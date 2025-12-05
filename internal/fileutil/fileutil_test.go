@@ -205,3 +205,142 @@ func TestCopyFile(t *testing.T) {
 		})
 	})
 }
+
+func TestSafeJoin(t *testing.T) {
+	t.Run("ValidPaths", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			base     string
+			path     string
+			expected string
+		}{
+			{
+				name:     "simple file",
+				base:     "/base",
+				path:     "file.txt",
+				expected: "/base/file.txt",
+			},
+			{
+				name:     "nested path",
+				base:     "/base",
+				path:     "subdir/file.txt",
+				expected: "/base/subdir/file.txt",
+			},
+			{
+				name:     "deep nested path",
+				base:     "/base",
+				path:     "a/b/c/d/file.txt",
+				expected: "/base/a/b/c/d/file.txt",
+			},
+			{
+				name:     "torrent-style path",
+				base:     "/downloads",
+				path:     "TorrentName/Season 01/episode.mkv",
+				expected: "/downloads/TorrentName/Season 01/episode.mkv",
+			},
+			{
+				name:     "path with dots in filename",
+				base:     "/base",
+				path:     "file.name.with.dots.txt",
+				expected: "/base/file.name.with.dots.txt",
+			},
+			{
+				name:     "single dot current dir",
+				base:     "/base",
+				path:     "./file.txt",
+				expected: "/base/file.txt",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				result, err := fileutil.SafeJoin(tt.base, tt.path)
+				require.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+			})
+		}
+	})
+
+	t.Run("PathTraversalAttacks", func(t *testing.T) {
+		base := "/base/dir"
+
+		tests := []struct {
+			name string
+			path string
+		}{
+			{
+				name: "simple parent traversal",
+				path: "../etc/passwd",
+			},
+			{
+				name: "double parent traversal",
+				path: "../../etc/passwd",
+			},
+			{
+				name: "traversal with subdir prefix",
+				path: "subdir/../../etc/passwd",
+			},
+			{
+				name: "multiple traversals",
+				path: "../../../../../../../etc/passwd",
+			},
+			{
+				name: "traversal at start",
+				path: "../sibling/file.txt",
+			},
+			{
+				name: "hidden traversal with dot segments",
+				path: "foo/../../../bar",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				_, err := fileutil.SafeJoin(base, tt.path)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "path")
+			})
+		}
+	})
+
+	t.Run("AbsolutePaths", func(t *testing.T) {
+		base := "/base"
+
+		tests := []struct {
+			name string
+			path string
+		}{
+			{
+				name: "absolute unix path",
+				path: "/etc/passwd",
+			},
+			{
+				name: "absolute with traversal",
+				path: "/base/../etc/passwd",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				_, err := fileutil.SafeJoin(base, tt.path)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "relative")
+			})
+		}
+	})
+
+	t.Run("RealFilesystem", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		t.Run("valid path works", func(t *testing.T) {
+			result, err := fileutil.SafeJoin(tmpDir, "subdir/file.txt")
+			require.NoError(t, err)
+			assert.Equal(t, filepath.Join(tmpDir, "subdir/file.txt"), result)
+		})
+
+		t.Run("traversal blocked", func(t *testing.T) {
+			_, err := fileutil.SafeJoin(tmpDir, "../outside.txt")
+			require.Error(t, err)
+		})
+	})
+}

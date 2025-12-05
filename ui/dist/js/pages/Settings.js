@@ -2,6 +2,7 @@
 
 import m from 'mithril';
 import { getSpeedUnit, setSpeedUnit } from '../utils/format.js';
+import { theme, setThemePreference } from '../state.js';
 
 // Section header component
 const SectionHeader = {
@@ -34,7 +35,25 @@ const Settings = {
                     m(SectionHeader, { title: 'Display' }),
 
                     m('.card.bg-base-200.border.border-base-300', [
-                        m('.card-body.p-4', [
+                        m('.card-body.p-4.space-y-4', [
+                            // Theme setting
+                            m('.flex.items-center.justify-between', [
+                                m('div', [
+                                    m('h3.font-medium', 'Theme'),
+                                    m('p.text-sm.text-base-content/70', 'Choose your preferred color scheme')
+                                ]),
+                                m('select.select.select-bordered.select-sm.w-32', {
+                                    value: theme.preference,
+                                    onchange: (e) => {
+                                        setThemePreference(e.target.value);
+                                    }
+                                }, [
+                                    m('option', { value: 'system' }, 'System'),
+                                    m('option', { value: 'light' }, 'Light'),
+                                    m('option', { value: 'dark' }, 'Dark')
+                                ])
+                            ]),
+
                             // Speed unit setting
                             m('.flex.items-center.justify-between', [
                                 m('div', [

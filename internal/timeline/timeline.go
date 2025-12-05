@@ -57,6 +57,9 @@ type Recorder interface {
 	// GetByDownload returns events for a specific download, newest first.
 	GetByDownload(downloadID string) []Event
 
+	// GetByDownloadAndDownloader returns events for a specific download from a specific downloader.
+	GetByDownloadAndDownloader(downloadID, downloaderName string) []Event
+
 	// GetByApp returns events for a specific app, newest first.
 	GetByApp(appName string) []Event
 
@@ -163,6 +166,20 @@ func (r *recorder) GetByDownload(downloadID string) []Event {
 	var result []Event
 	for _, e := range r.events {
 		if e.DownloadID == downloadID {
+			result = append(result, e)
+		}
+	}
+	return result
+}
+
+// GetByDownloadAndDownloader returns events for a specific download from a specific downloader.
+func (r *recorder) GetByDownloadAndDownloader(downloadID, downloaderName string) []Event {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []Event
+	for _, e := range r.events {
+		if e.DownloadID == downloadID && e.Downloader == downloaderName {
 			result = append(result, e)
 		}
 	}

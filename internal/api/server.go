@@ -6,6 +6,7 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
+	"regexp"
 	"sort"
 
 	"github.com/labstack/echo/v4"
@@ -17,6 +18,29 @@ import (
 	"github.com/seedreap/seedreap/internal/filesync"
 	"github.com/seedreap/seedreap/internal/orchestrator"
 )
+
+// validIDPattern matches valid ID formats: alphanumeric, hyphens, underscores.
+// This is intentionally permissive to support various downloader ID formats
+// (hashes, UUIDs, numeric IDs, etc.) while blocking path traversal and injection.
+var validIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+// maxIDLength is the maximum allowed length for ID parameters.
+const maxIDLength = 256
+
+// validateID checks that an ID parameter is non-empty, reasonable length,
+// and contains only safe characters.
+func validateID(id string) error {
+	if id == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	}
+	if len(id) > maxIDLength {
+		return echo.NewHTTPError(http.StatusBadRequest, "id too long")
+	}
+	if !validIDPattern.MatchString(id) {
+		return echo.NewHTTPError(http.StatusBadRequest, "id contains invalid characters")
+	}
+	return nil
+}
 
 // Server is the HTTP API server.
 type Server struct {
@@ -129,11 +153,8 @@ func (s *Server) setupRoutes() {
 
 	// Downloads
 	api.GET("/downloads", s.listDownloadsHandler)
-	api.GET("/downloads/:id", s.getDownloadHandler)
-
-	// Sync jobs
-	api.GET("/jobs", s.listJobsHandler)
-	api.GET("/jobs/:id", s.getJobHandler)
+	api.GET("/downloaders/:downloader/downloads/:id", s.getDownloadHandler)
+	api.GET("/downloaders/:downloader/downloads/:id/timeline", s.downloadTimelineHandler)
 
 	// Speed history for sparkline
 	api.GET("/speed-history", s.speedHistoryHandler)
@@ -148,7 +169,6 @@ func (s *Server) setupRoutes() {
 	api.GET("/timeline", s.timelineHandler)
 	api.GET("/apps/:id/timeline", s.appTimelineHandler)
 	api.GET("/downloaders/:id/timeline", s.downloaderTimelineHandler)
-	api.GET("/jobs/:id/timeline", s.jobTimelineHandler)
 
 	// Serve UI if available
 	if s.uiFS != nil {
@@ -192,17 +212,20 @@ func (s *Server) listDownloadsHandler(c echo.Context) error {
 	tracked := s.orchestrator.GetTrackedDownloads()
 
 	type downloadResponse struct {
-		ID           string  `json:"id"`
-		Name         string  `json:"name"`
-		Downloader   string  `json:"downloader"`
-		Category     string  `json:"category"`
-		State        string  `json:"state"`
-		Progress     float64 `json:"progress"`
-		Size         int64   `json:"size"`
-		SyncedBytes  int64   `json:"synced_bytes"`
-		Error        string  `json:"error,omitempty"`
-		DiscoveredAt string  `json:"discovered_at"`
-		CompletedAt  string  `json:"completed_at,omitempty"`
+		ID            string  `json:"id"`
+		Name          string  `json:"name"`
+		Downloader    string  `json:"downloader"`
+		Category      string  `json:"category"`
+		App           string  `json:"app"`
+		State         string  `json:"state"`
+		Progress      float64 `json:"progress"`
+		Size          int64   `json:"size"`
+		CompletedSize int64   `json:"completed_size"`
+		TotalFiles    int     `json:"total_files"`
+		BytesPerSec   int64   `json:"bytes_per_sec"`
+		Error         string  `json:"error,omitempty"`
+		DiscoveredAt  string  `json:"discovered_at"`
+		CompletedAt   string  `json:"completed_at,omitempty"`
 	}
 
 	downloads := make([]downloadResponse, 0, len(tracked))
@@ -210,41 +233,51 @@ func (s *Server) listDownloadsHandler(c echo.Context) error {
 		dl := td.GetDownload()
 
 		// Only include downloads for categories that have matching apps
-		if len(s.apps.GetByCategory(dl.Category)) == 0 {
+		apps := s.apps.GetByCategory(dl.Category)
+		if len(apps) == 0 {
 			continue
 		}
 
 		state := td.GetState()
-		err := td.GetError()
+		tdErr := td.GetError()
 		discoveredAt, completedAt := td.GetTimes()
-		job := td.GetSyncJob()
+		syncDownload := td.GetSyncDownload()
 
 		resp := downloadResponse{
 			ID:           dl.ID,
 			Name:         dl.Name,
 			Downloader:   td.DownloaderName,
 			Category:     dl.Category,
+			App:          apps[0].Name(),
 			State:        string(state),
 			Progress:     dl.Progress,
 			Size:         dl.Size,
+			TotalFiles:   len(dl.Files),
 			DiscoveredAt: discoveredAt.Format("2006-01-02T15:04:05Z07:00"),
 		}
 
-		if err != nil {
-			resp.Error = err.Error()
+		if tdErr != nil {
+			resp.Error = tdErr.Error()
 		}
 
 		if !completedAt.IsZero() {
 			resp.CompletedAt = completedAt.Format("2006-01-02T15:04:05Z07:00")
 		}
 
-		if job != nil {
-			syncedBytes, _ := job.GetProgress()
-			resp.SyncedBytes = syncedBytes
+		if syncDownload != nil {
+			snapshot := syncDownload.Snapshot()
+			resp.CompletedSize = snapshot.CompletedSize
+			resp.TotalFiles = snapshot.TotalFiles
+			resp.BytesPerSec = snapshot.BytesPerSec
+		} else if state == orchestrator.StateComplete {
+			resp.CompletedSize = dl.Size
 		}
 
 		downloads = append(downloads, resp)
 	}
+
+	// Record total speed for sparkline history from the transferer
+	s.syncer.RecordSpeed(s.syncer.GetAggregateSpeed())
 
 	// Sort by name for consistent ordering
 	sort.Slice(downloads, func(i, j int) bool {
@@ -254,202 +287,77 @@ func (s *Server) listDownloadsHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, downloads)
 }
 
+//nolint:gocognit,nestif // handler has multiple code paths for different data sources
 func (s *Server) getDownloadHandler(c echo.Context) error {
+	downloader := c.Param("downloader")
+	if err := validateID(downloader); err != nil {
+		return err
+	}
 	id := c.Param("id")
+	if err := validateID(id); err != nil {
+		return err
+	}
 
 	tracked := s.orchestrator.GetTrackedDownloads()
 	for _, td := range tracked {
 		dl := td.GetDownload()
-		if dl.ID == id {
-			state := td.GetState()
-			job := td.GetSyncJob()
-
-			resp := map[string]any{
-				"id":         dl.ID,
-				"name":       dl.Name,
-				"downloader": td.DownloaderName,
-				"category":   dl.Category,
-				"state":      string(state),
-				"progress":   dl.Progress,
-				"size":       dl.Size,
-				"save_path":  dl.SavePath,
-			}
-
-			if job != nil {
-				snapshot := job.Snapshot()
-				files := make([]map[string]any, 0, len(snapshot.Files))
-				for _, f := range snapshot.Files {
-					files = append(files, map[string]any{
-						"path":          f.Path,
-						"size":          f.Size,
-						"transferred":   f.Transferred,
-						"status":        string(f.Status),
-						"bytes_per_sec": f.BytesPerSec,
-					})
-				}
-				resp["files"] = files
-			}
-
-			return c.JSON(http.StatusOK, resp)
-		}
-	}
-
-	return c.JSON(http.StatusNotFound, map[string]string{
-		"error": "download not found",
-	})
-}
-
-func (s *Server) listJobsHandler(c echo.Context) error {
-	type jobResponse struct {
-		ID              string  `json:"id"`
-		Name            string  `json:"name"`
-		Downloader      string  `json:"downloader"`
-		Category        string  `json:"category"`
-		App             string  `json:"app"`
-		Status          string  `json:"status"`
-		SeedboxState    string  `json:"seedbox_state"`
-		SeedboxProgress float64 `json:"seedbox_progress"`
-		TotalSize       int64   `json:"total_size"`
-		CompletedSize   int64   `json:"completed_size"`
-		TotalFiles      int     `json:"total_files"`
-		BytesPerSec     int64   `json:"bytes_per_sec"`
-	}
-
-	response := make([]jobResponse, 0)
-
-	// Add all tracked downloads (includes those with and without sync jobs)
-	for _, td := range s.orchestrator.GetTrackedDownloads() {
-		dl := td.GetDownload()
-
-		// Only include downloads for categories that have matching apps
-		apps := s.apps.GetByCategory(dl.Category)
-		if len(apps) == 0 {
+		if td.DownloaderName != downloader || dl.ID != id {
 			continue
 		}
 
-		// Get app name (use first matching app)
-		appName := apps[0].Name()
-
-		job := td.GetSyncJob()
 		state := td.GetState()
+		syncDownload := td.GetSyncDownload()
 
-		var resp jobResponse
-		if job != nil {
-			// Has a sync job - use its data
-			snapshot := job.Snapshot()
-			resp = jobResponse{
-				ID:              snapshot.ID,
-				Name:            snapshot.Name,
-				Downloader:      snapshot.Downloader,
-				Category:        snapshot.Category,
-				App:             appName,
-				Status:          string(snapshot.Status),
-				SeedboxState:    string(dl.State),
-				SeedboxProgress: dl.Progress,
-				TotalSize:       snapshot.TotalSize,
-				CompletedSize:   snapshot.CompletedSize,
-				TotalFiles:      snapshot.TotalFiles,
-				BytesPerSec:     snapshot.BytesPerSec,
+		resp := map[string]any{
+			"id":             dl.ID,
+			"name":           dl.Name,
+			"downloader":     td.DownloaderName,
+			"category":       dl.Category,
+			"state":          string(state),
+			"progress":       dl.Progress,
+			"size":           dl.Size,
+			"save_path":      dl.SavePath,
+			"completed_size": int64(0),
+			"total_files":    len(dl.Files),
+			"bytes_per_sec":  int64(0),
+		}
+
+		if syncDownload != nil {
+			snapshot := syncDownload.Snapshot()
+			resp["completed_size"] = snapshot.CompletedSize
+			resp["total_files"] = snapshot.TotalFiles
+			resp["bytes_per_sec"] = snapshot.BytesPerSec
+			resp["remote_base"] = snapshot.RemoteBase
+			resp["local_base"] = snapshot.LocalBase
+			resp["final_path"] = snapshot.FinalPath
+
+			files := make([]map[string]any, 0, len(snapshot.Files))
+			for _, f := range snapshot.Files {
+				files = append(files, map[string]any{
+					"path":          f.Path,
+					"size":          f.Size,
+					"transferred":   f.Transferred,
+					"status":        string(f.Status),
+					"bytes_per_sec": f.BytesPerSec,
+				})
 			}
+			resp["files"] = files
 		} else {
-			// No sync job - use tracked download data
-			// This happens when files already exist at final destination or still downloading
-			resp = jobResponse{
-				ID:              dl.ID,
-				Name:            dl.Name,
-				Downloader:      td.DownloaderName,
-				Category:        dl.Category,
-				App:             appName,
-				Status:          string(state), // Use orchestrator state
-				SeedboxState:    string(dl.State),
-				SeedboxProgress: dl.Progress,
-				TotalSize:       dl.Size,
-				CompletedSize:   0, // No sync progress yet
-				TotalFiles:      len(dl.Files),
-				BytesPerSec:     0, // No active transfer
-			}
-
-			// If state is complete, files are done
-			if state == orchestrator.StateComplete {
-				resp.CompletedSize = dl.Size
-			}
-		}
-
-		response = append(response, resp)
-	}
-
-	// Record total speed for sparkline history from the transferer
-	s.syncer.RecordSpeed(s.syncer.GetAggregateSpeed())
-
-	// Sort by name for consistent ordering
-	sort.Slice(response, func(i, j int) bool {
-		return response[i].Name < response[j].Name
-	})
-
-	return c.JSON(http.StatusOK, response)
-}
-
-//nolint:gocognit // handler has multiple code paths for different data sources
-func (s *Server) getJobHandler(c echo.Context) error {
-	id := c.Param("id")
-
-	// First try to get from syncer (has detailed file info)
-	job, ok := s.syncer.GetJob(id)
-	if ok {
-		snapshot := job.Snapshot()
-
-		files := make([]map[string]any, 0, len(snapshot.Files))
-		for _, f := range snapshot.Files {
-			files = append(files, map[string]any{
-				"path":          f.Path,
-				"size":          f.Size,
-				"transferred":   f.Transferred,
-				"status":        string(f.Status),
-				"bytes_per_sec": f.BytesPerSec,
-			})
-		}
-
-		return c.JSON(http.StatusOK, map[string]any{
-			"id":             snapshot.ID,
-			"name":           snapshot.Name,
-			"downloader":     snapshot.Downloader,
-			"category":       snapshot.Category,
-			"status":         string(snapshot.Status),
-			"total_size":     snapshot.TotalSize,
-			"completed_size": snapshot.CompletedSize,
-			"total_files":    snapshot.TotalFiles,
-			"remote_base":    snapshot.RemoteBase,
-			"local_base":     snapshot.LocalBase,
-			"final_path":     snapshot.FinalPath,
-			"files":          files,
-		})
-	}
-
-	// Fall back to tracked download (for completed downloads without sync job)
-	for _, td := range s.orchestrator.GetTrackedDownloads() {
-		dl := td.GetDownload()
-		if dl.ID == id { //nolint:nestif // building response requires nested conditions
-			state := td.GetState()
-
-			// Build file list from download info
+			// Build file list from download info when no sync in progress
 			files := make([]map[string]any, 0, len(dl.Files))
 			var totalDownloaded int64
 			for _, f := range dl.Files {
 				if f.Priority == 0 {
 					continue
 				}
-
-				// Map file state to status string
-				status := string(f.State) // "downloading" or "complete"
+				status := string(f.State)
 				if f.State == "" {
-					// Fallback if state not set
 					if state == orchestrator.StateComplete {
 						status = "complete"
 					} else {
 						status = "pending"
 					}
 				}
-
 				files = append(files, map[string]any{
 					"path":          f.Path,
 					"size":          f.Size,
@@ -459,23 +367,16 @@ func (s *Server) getJobHandler(c echo.Context) error {
 				})
 				totalDownloaded += f.Downloaded
 			}
-
-			return c.JSON(http.StatusOK, map[string]any{
-				"id":             dl.ID,
-				"name":           dl.Name,
-				"downloader":     td.DownloaderName,
-				"category":       dl.Category,
-				"status":         string(state),
-				"total_size":     dl.Size,
-				"completed_size": totalDownloaded,
-				"total_files":    len(files),
-				"files":          files,
-			})
+			resp["files"] = files
+			resp["completed_size"] = totalDownloaded
+			resp["total_files"] = len(files)
 		}
+
+		return c.JSON(http.StatusOK, resp)
 	}
 
 	return c.JSON(http.StatusNotFound, map[string]string{
-		"error": "job not found",
+		"error": "download not found",
 	})
 }
 
@@ -528,7 +429,6 @@ func (s *Server) indexHandler(c echo.Context) error {
         <li><a href="/api/health">/api/health</a> - Health check</li>
         <li><a href="/api/stats">/api/stats</a> - Statistics</li>
         <li><a href="/api/downloads">/api/downloads</a> - List tracked downloads</li>
-        <li><a href="/api/jobs">/api/jobs</a> - List sync jobs</li>
         <li><a href="/api/downloaders">/api/downloaders</a> - List configured downloaders</li>
         <li><a href="/api/apps">/api/apps</a> - List configured apps</li>
     </ul>
@@ -553,6 +453,9 @@ func (s *Server) timelineHandler(c echo.Context) error {
 
 func (s *Server) appTimelineHandler(c echo.Context) error {
 	id := c.Param("id")
+	if err := validateID(id); err != nil {
+		return err
+	}
 
 	tl := s.orchestrator.GetTimeline()
 	if tl == nil {
@@ -564,6 +467,9 @@ func (s *Server) appTimelineHandler(c echo.Context) error {
 
 func (s *Server) downloaderTimelineHandler(c echo.Context) error {
 	id := c.Param("id")
+	if err := validateID(id); err != nil {
+		return err
+	}
 
 	tl := s.orchestrator.GetTimeline()
 	if tl == nil {
@@ -573,13 +479,20 @@ func (s *Server) downloaderTimelineHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, tl.GetByDownloader(id))
 }
 
-func (s *Server) jobTimelineHandler(c echo.Context) error {
+func (s *Server) downloadTimelineHandler(c echo.Context) error {
+	downloader := c.Param("downloader")
+	if err := validateID(downloader); err != nil {
+		return err
+	}
 	id := c.Param("id")
+	if err := validateID(id); err != nil {
+		return err
+	}
 
 	tl := s.orchestrator.GetTimeline()
 	if tl == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
 
-	return c.JSON(http.StatusOK, tl.GetByDownload(id))
+	return c.JSON(http.StatusOK, tl.GetByDownloadAndDownloader(id, downloader))
 }

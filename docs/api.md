@@ -51,7 +51,7 @@ GET /api/stats
 
 ### List Downloads
 
-Get all tracked downloads.
+Get all tracked downloads with transfer status.
 
 ```http
 GET /api/downloads
@@ -66,28 +66,34 @@ GET /api/downloads
     "name": "Show.S01E01.720p",
     "downloader": "seedbox",
     "category": "tv-sonarr",
+    "app": "sonarr",
     "state": "syncing",
     "progress": 100,
     "size": 1073741824,
-    "synced_bytes": 536870912,
+    "completed_size": 536870912,
+    "total_files": 1,
+    "bytes_per_sec": 52428800,
     "discovered_at": "2024-01-15T10:30:00Z"
   }
 ]
 ```
 
-| Field           | Type   | Description                        |
-| --------------- | ------ | ---------------------------------- |
-| `id`            | string | Unique download identifier         |
-| `name`          | string | Download name                      |
-| `downloader`    | string | Source downloader name             |
-| `category`      | string | Download category                  |
-| `state`         | string | Current state (see below)          |
-| `progress`      | float  | Download progress (0-100)          |
-| `size`          | int    | Total size in bytes                |
-| `synced_bytes`  | int    | Bytes transferred so far           |
-| `error`         | string | Error message if failed            |
-| `discovered_at` | string | ISO 8601 timestamp                 |
-| `completed_at`  | string | ISO 8601 timestamp (if complete)   |
+| Field            | Type   | Description                        |
+| ---------------- | ------ | ---------------------------------- |
+| `id`             | string | Unique download identifier         |
+| `name`           | string | Download name                      |
+| `downloader`     | string | Source downloader name             |
+| `category`       | string | Download category                  |
+| `app`            | string | Target app name                    |
+| `state`          | string | Current state (see below)          |
+| `progress`       | float  | Download progress (0-100)          |
+| `size`           | int    | Total size in bytes                |
+| `completed_size` | int    | Bytes transferred so far           |
+| `total_files`    | int    | Number of files in download        |
+| `bytes_per_sec`  | int    | Current transfer speed             |
+| `error`          | string | Error message if failed (optional) |
+| `discovered_at`  | string | ISO 8601 timestamp                 |
+| `completed_at`   | string | ISO 8601 timestamp (optional)      |
 
 **States**
 
@@ -103,11 +109,18 @@ GET /api/downloads
 
 ### Get Download
 
-Get details for a specific download.
+Get details for a specific download including per-file progress.
 
 ```http
-GET /api/downloads/:id
+GET /api/downloaders/:downloader/downloads/:id
 ```
+
+**Parameters**
+
+| Parameter    | Type   | Description              |
+| ------------ | ------ | ------------------------ |
+| `downloader` | string | Downloader name          |
+| `id`         | string | Download ID              |
 
 **Response**
 
@@ -121,70 +134,11 @@ GET /api/downloads/:id
   "progress": 100,
   "size": 1073741824,
   "save_path": "/downloads/tv-sonarr",
-  "files": [
-    {
-      "path": "Show.S01E01.720p.mkv",
-      "size": 1073741824,
-      "transferred": 536870912,
-      "status": "syncing",
-      "bytes_per_sec": 52428800
-    }
-  ]
-}
-```
-
----
-
-### List Jobs
-
-Get all sync jobs with transfer status.
-
-```http
-GET /api/jobs
-```
-
-**Response**
-
-```json
-[
-  {
-    "id": "abc123",
-    "name": "Show.S01E01.720p",
-    "downloader": "seedbox",
-    "category": "tv-sonarr",
-    "status": "syncing",
-    "total_size": 1073741824,
-    "completed_size": 536870912,
-    "total_files": 1,
-    "bytes_per_sec": 52428800
-  }
-]
-```
-
----
-
-### Get Job
-
-Get detailed job information with per-file progress.
-
-```http
-GET /api/jobs/:id
-```
-
-**Response**
-
-```json
-{
-  "id": "abc123",
-  "name": "Show.S01E01.720p",
-  "downloader": "seedbox",
-  "category": "tv-sonarr",
-  "status": "syncing",
-  "total_size": 1073741824,
   "completed_size": 536870912,
   "total_files": 1,
+  "bytes_per_sec": 52428800,
   "remote_base": "/home/user/downloads/Show.S01E01.720p",
-  "local_base": "/downloads/syncing/Show.S01E01.720p",
+  "local_base": "/downloads/syncing/seedbox/abc123",
   "final_path": "/downloads/tv-sonarr/Show.S01E01.720p",
   "files": [
     {

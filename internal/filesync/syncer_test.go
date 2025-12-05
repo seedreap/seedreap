@@ -101,11 +101,11 @@ func TestFileProgress(t *testing.T) {
 	})
 }
 
-// --- SyncJob Tests ---
+// --- SyncDownload Tests ---
 
-func TestSyncJob(t *testing.T) {
+func TestSyncDownload(t *testing.T) {
 	t.Run("GetProgress", func(t *testing.T) {
-		job := createTestJob()
+		job := createTestSyncDownload()
 
 		completedSize, status := job.GetProgress()
 		assert.Equal(t, int64(0), completedSize)
@@ -120,7 +120,7 @@ func TestSyncJob(t *testing.T) {
 	})
 
 	t.Run("Cancel", func(t *testing.T) {
-		job := createTestJob()
+		job := createTestSyncDownload()
 
 		assert.False(t, job.IsCancelled())
 
@@ -132,7 +132,7 @@ func TestSyncJob(t *testing.T) {
 	})
 
 	t.Run("Context", func(t *testing.T) {
-		job := createTestJob()
+		job := createTestSyncDownload()
 
 		ctx := job.Context()
 		require.NotNil(t, ctx)
@@ -149,7 +149,7 @@ func TestSyncJob(t *testing.T) {
 	})
 
 	t.Run("UpdateDestination", func(t *testing.T) {
-		job := createTestJob()
+		job := createTestSyncDownload()
 
 		assert.Equal(t, "tv", job.Category)
 		assert.Equal(t, "/downloads/tv", job.FinalPath)
@@ -161,7 +161,7 @@ func TestSyncJob(t *testing.T) {
 	})
 
 	t.Run("Snapshot", func(t *testing.T) {
-		job := createTestJob()
+		job := createTestSyncDownload()
 		job.Files[0].SetProgress(256*1024, 100*1024)
 		job.Files[0].Status = filesync.FileStatusSyncing
 
@@ -178,7 +178,7 @@ func TestSyncJob(t *testing.T) {
 	})
 
 	t.Run("ConcurrentAccess", func(_ *testing.T) {
-		job := createTestJob()
+		job := createTestSyncDownload()
 
 		var wg sync.WaitGroup
 		const goroutines = 10
@@ -226,7 +226,7 @@ func TestSyncer(t *testing.T) {
 
 			dl := createTestDownload("hash1", "TestTorrent", "tv")
 
-			job := syncer.CreateJob(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
+			job := syncer.CreateSyncDownload(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
 
 			assert.Equal(t, "hash1", job.ID)
 			assert.Equal(t, "TestTorrent", job.Name)
@@ -243,8 +243,8 @@ func TestSyncer(t *testing.T) {
 
 			dl := createTestDownload("hash1", "TestTorrent", "tv")
 
-			job1 := syncer.CreateJob(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
-			job2 := syncer.CreateJob(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
+			job1 := syncer.CreateSyncDownload(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
+			job2 := syncer.CreateSyncDownload(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
 
 			assert.Same(t, job1, job2, "should return the same job instance")
 		})
@@ -264,7 +264,7 @@ func TestSyncer(t *testing.T) {
 				},
 			}
 
-			job := syncer.CreateJob(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
+			job := syncer.CreateSyncDownload(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
 
 			assert.Len(t, job.Files, 1)
 			assert.Equal(t, int64(512*1024), job.TotalSize)
@@ -282,7 +282,7 @@ func TestSyncer(t *testing.T) {
 			require.NoError(t, os.MkdirAll(filepath.Dir(existingPath), 0750))
 			require.NoError(t, os.WriteFile(existingPath, make([]byte, 512*1024), 0600))
 
-			job := syncer.CreateJob(dl, "test-downloader", finalPath)
+			job := syncer.CreateSyncDownload(dl, "test-downloader", finalPath)
 
 			// First file should be skipped (exists)
 			assert.Equal(t, filesync.FileStatusSkipped, job.Files[0].Status)
@@ -293,22 +293,28 @@ func TestSyncer(t *testing.T) {
 		})
 	})
 
-	t.Run("GetJob", func(t *testing.T) {
+	t.Run("GetJobByKey", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		syncer := filesync.New(filepath.Join(tmpDir, "syncing"))
 
 		dl := createTestDownload("hash1", "TestTorrent", "tv")
-		syncer.CreateJob(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
+		syncer.CreateSyncDownload(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
 
 		t.Run("Found", func(t *testing.T) {
-			job, ok := syncer.GetJob("hash1")
+			job, ok := syncer.GetByKey("test-downloader", "hash1")
 			assert.True(t, ok)
 			assert.NotNil(t, job)
 			assert.Equal(t, "hash1", job.ID)
 		})
 
 		t.Run("NotFound", func(t *testing.T) {
-			job, ok := syncer.GetJob("nonexistent")
+			job, ok := syncer.GetByKey("test-downloader", "nonexistent")
+			assert.False(t, ok)
+			assert.Nil(t, job)
+		})
+
+		t.Run("WrongDownloader", func(t *testing.T) {
+			job, ok := syncer.GetByKey("other-downloader", "hash1")
 			assert.False(t, ok)
 			assert.Nil(t, job)
 		})
@@ -321,37 +327,37 @@ func TestSyncer(t *testing.T) {
 		dl1 := createTestDownload("hash1", "Torrent1", "tv")
 		dl2 := createTestDownload("hash2", "Torrent2", "movies")
 
-		syncer.CreateJob(dl1, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
-		syncer.CreateJob(dl2, "test-downloader", filepath.Join(tmpDir, "downloads/movies"))
+		syncer.CreateSyncDownload(dl1, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
+		syncer.CreateSyncDownload(dl2, "test-downloader", filepath.Join(tmpDir, "downloads/movies"))
 
-		jobs := syncer.GetAllJobs()
+		jobs := syncer.GetAll()
 		assert.Len(t, jobs, 2)
 	})
 
-	t.Run("RemoveJob", func(t *testing.T) {
+	t.Run("RemoveJobByKey", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		syncer := filesync.New(filepath.Join(tmpDir, "syncing"))
 
 		dl := createTestDownload("hash1", "TestTorrent", "tv")
-		syncer.CreateJob(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
+		syncer.CreateSyncDownload(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
 
-		_, ok := syncer.GetJob("hash1")
+		_, ok := syncer.GetByKey("test-downloader", "hash1")
 		require.True(t, ok)
 
-		syncer.RemoveJob("hash1")
+		syncer.RemoveByKey("test-downloader", "hash1")
 
-		_, ok = syncer.GetJob("hash1")
+		_, ok = syncer.GetByKey("test-downloader", "hash1")
 		assert.False(t, ok)
 	})
 
-	t.Run("CancelJob", func(t *testing.T) {
+	t.Run("CancelJobByKey", func(t *testing.T) {
 		t.Run("ExistingJob", func(t *testing.T) {
 			tmpDir := t.TempDir()
 			syncingPath := filepath.Join(tmpDir, "syncing")
 			syncer := filesync.New(syncingPath)
 
 			dl := createTestDownload("hash1", "TestTorrent", "tv")
-			job := syncer.CreateJob(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
+			job := syncer.CreateSyncDownload(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
 
 			// Create staging directory to verify cleanup
 			require.NoError(t, os.MkdirAll(job.LocalBase, 0750))
@@ -361,7 +367,7 @@ func TestSyncer(t *testing.T) {
 				0600,
 			))
 
-			err := syncer.CancelJob("hash1")
+			err := syncer.CancelByKey("test-downloader", "hash1")
 			require.NoError(t, err)
 
 			assert.True(t, job.IsCancelled())
@@ -374,7 +380,7 @@ func TestSyncer(t *testing.T) {
 		t.Run("NonexistentJob", func(t *testing.T) {
 			syncer := filesync.New("/syncing")
 
-			err := syncer.CancelJob("nonexistent")
+			err := syncer.CancelByKey("test-downloader", "nonexistent")
 			assert.NoError(t, err, "should not error for nonexistent job")
 		})
 	})
@@ -464,7 +470,7 @@ func TestSyncFile(t *testing.T) {
 		)
 
 		dl := createTestDownload("hash1", "TestTorrent", "tv")
-		job := syncer.CreateJob(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
+		job := syncer.CreateSyncDownload(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
 
 		err := syncer.SyncFile(context.Background(), mockDL, job, job.Files[0])
 		require.NoError(t, err)
@@ -489,7 +495,7 @@ func TestSyncFile(t *testing.T) {
 		)
 
 		dl := createTestDownload("hash1", "TestTorrent", "tv")
-		job := syncer.CreateJob(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
+		job := syncer.CreateSyncDownload(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
 
 		// Pre-create the file at staging location with correct size
 		require.NoError(t, os.MkdirAll(filepath.Dir(job.Files[0].LocalPath), 0750))
@@ -522,7 +528,7 @@ func TestSyncFile(t *testing.T) {
 		)
 
 		dl := createTestDownload("hash1", "TestTorrent", "tv")
-		job := syncer.CreateJob(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
+		job := syncer.CreateSyncDownload(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
 
 		err := syncer.SyncFile(context.Background(), mockDL, job, job.Files[0])
 		require.Error(t, err)
@@ -550,7 +556,7 @@ func TestSyncFile(t *testing.T) {
 		)
 
 		dl := createTestDownload("hash1", "TestTorrent", "tv")
-		job := syncer.CreateJob(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
+		job := syncer.CreateSyncDownload(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel immediately
@@ -573,7 +579,7 @@ func TestSyncFile(t *testing.T) {
 		)
 
 		dl := createTestDownload("hash1", "TestTorrent", "tv")
-		job := syncer.CreateJob(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
+		job := syncer.CreateSyncDownload(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
 
 		err := syncer.SyncFile(context.Background(), mockDL, job, job.Files[0])
 		require.Error(t, err)
@@ -585,21 +591,21 @@ func TestSyncFile(t *testing.T) {
 		mockTransfer := testutil.NewMockTransferer()
 		mockDL := testutil.NewMockDownloader("test-downloader")
 
-		var callbackJob *filesync.SyncJob
+		var callbackJob *filesync.SyncDownload
 		var callbackFile *filesync.FileProgress
 
 		syncer := filesync.New(
 			filepath.Join(tmpDir, "syncing"),
 			filesync.WithTransferer(mockTransfer),
 			filesync.WithMaxConcurrent(1),
-			filesync.WithOnFileComplete(func(job *filesync.SyncJob, file *filesync.FileProgress) {
+			filesync.WithOnFileComplete(func(job *filesync.SyncDownload, file *filesync.FileProgress) {
 				callbackJob = job
 				callbackFile = file
 			}),
 		)
 
 		dl := createTestDownload("hash1", "TestTorrent", "tv")
-		job := syncer.CreateJob(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
+		job := syncer.CreateSyncDownload(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
 
 		err := syncer.SyncFile(context.Background(), mockDL, job, job.Files[0])
 		require.NoError(t, err)
@@ -609,9 +615,9 @@ func TestSyncFile(t *testing.T) {
 	})
 }
 
-// --- SyncJob (method) Tests ---
+// --- Sync (method) Tests ---
 
-func TestSyncerSyncJob(t *testing.T) {
+func TestSyncerSync(t *testing.T) {
 	t.Run("Success", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		mockTransfer := testutil.NewMockTransferer()
@@ -626,9 +632,9 @@ func TestSyncerSyncJob(t *testing.T) {
 		dl := createTestDownload("hash1", "TestTorrent", "tv")
 		mockDL.AddDownload(dl, dl.Files)
 
-		job := syncer.CreateJob(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
+		job := syncer.CreateSyncDownload(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
 
-		err := syncer.SyncJob(context.Background(), mockDL, job)
+		err := syncer.Sync(context.Background(), mockDL, job)
 		require.NoError(t, err)
 
 		_, status := job.GetProgress()
@@ -646,11 +652,11 @@ func TestSyncerSyncJob(t *testing.T) {
 		)
 
 		dl := createTestDownload("hash1", "TestTorrent", "tv")
-		job := syncer.CreateJob(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
+		job := syncer.CreateSyncDownload(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
 
 		job.Cancel()
 
-		err := syncer.SyncJob(context.Background(), mockDL, job)
+		err := syncer.Sync(context.Background(), mockDL, job)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, context.Canceled)
 	})
@@ -660,13 +666,13 @@ func TestSyncerSyncJob(t *testing.T) {
 		mockTransfer := testutil.NewMockTransferer()
 		mockDL := testutil.NewMockDownloader("test-downloader")
 
-		var callbackJob *filesync.SyncJob
+		var callbackJob *filesync.SyncDownload
 
 		syncer := filesync.New(
 			filepath.Join(tmpDir, "syncing"),
 			filesync.WithTransferer(mockTransfer),
 			filesync.WithMaxConcurrent(2),
-			filesync.WithOnJobComplete(func(job *filesync.SyncJob) {
+			filesync.WithOnSyncComplete(func(job *filesync.SyncDownload) {
 				callbackJob = job
 			}),
 		)
@@ -674,9 +680,9 @@ func TestSyncerSyncJob(t *testing.T) {
 		dl := createTestDownload("hash1", "TestTorrent", "tv")
 		mockDL.AddDownload(dl, dl.Files)
 
-		job := syncer.CreateJob(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
+		job := syncer.CreateSyncDownload(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
 
-		err := syncer.SyncJob(context.Background(), mockDL, job)
+		err := syncer.Sync(context.Background(), mockDL, job)
 		require.NoError(t, err)
 
 		assert.Same(t, job, callbackJob)
@@ -717,9 +723,9 @@ func TestSyncerSyncJob(t *testing.T) {
 		}
 		mockDL.AddDownload(dl, dl.Files)
 
-		job := syncer.CreateJob(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
+		job := syncer.CreateSyncDownload(dl, "test-downloader", filepath.Join(tmpDir, "downloads/tv"))
 
-		err := syncer.SyncJob(context.Background(), mockDL, job)
+		err := syncer.Sync(context.Background(), mockDL, job)
 		require.NoError(t, err)
 
 		// Job should be pending (not all files complete)
@@ -747,7 +753,7 @@ func TestMoveToFinal(t *testing.T) {
 
 		dl := createTestDownload("hash1", "TestTorrent", "tv")
 		finalPath := filepath.Join(tmpDir, "downloads/tv")
-		job := syncer.CreateJob(dl, "test-downloader", finalPath)
+		job := syncer.CreateSyncDownload(dl, "test-downloader", finalPath)
 
 		// Create files at staging location
 		for _, f := range job.Files {
@@ -778,7 +784,7 @@ func TestMoveToFinal(t *testing.T) {
 
 		dl := createTestDownload("hash1", "TestTorrent", "tv")
 		finalPath := filepath.Join(tmpDir, "downloads/tv")
-		job := syncer.CreateJob(dl, "test-downloader", finalPath)
+		job := syncer.CreateSyncDownload(dl, "test-downloader", finalPath)
 
 		// Only mark first file as complete
 		require.NoError(t, os.MkdirAll(filepath.Dir(job.Files[0].LocalPath), 0750))
@@ -863,9 +869,9 @@ func createTestDownload(id, name, category string) *download.Download {
 	}
 }
 
-// createTestJob creates a SyncJob via the Syncer.CreateJob method to ensure
+// createTestSyncDownload creates a SyncDownload via the Syncer.CreateSyncDownload method to ensure
 // proper initialization of unexported fields like ctx and cancel.
-func createTestJob() *filesync.SyncJob {
+func createTestSyncDownload() *filesync.SyncDownload {
 	const (
 		name     = "TestTorrent"
 		category = "tv"
@@ -892,5 +898,5 @@ func createTestJob() *filesync.SyncJob {
 			},
 		},
 	}
-	return syncer.CreateJob(dl, "test-downloader", "/downloads/"+category)
+	return syncer.CreateSyncDownload(dl, "test-downloader", "/downloads/"+category)
 }

@@ -66,7 +66,7 @@ const TopBar = {
                 m('span.font-semibold.text-lg', 'SeedReap')
             ]),
             // On desktop: logo in fixed-width container to align with sidebar icons (w-16)
-            m('.hidden.lg:flex.w-16.justify-center.flex-none', [
+            m('.hidden.lg:flex.w-12.justify-center.flex-none', [
                 m('img.w-8.h-8', { src: '/logo.svg', alt: 'SeedReap' })
             ]),
             m('span.hidden.lg:inline.font-semibold.text-lg.mr-4', 'SeedReap'),

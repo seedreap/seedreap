@@ -38,6 +38,13 @@ const (
 	defaultMaxConcurrent = 2
 )
 
+// syncKey creates a composite key for the downloads map from downloader name and download ID.
+// This ensures downloads are unique per-downloader, allowing the same torrent to be
+// synced from different downloaders independently.
+func syncKey(downloaderName, downloadID string) string {
+	return downloaderName + ":" + downloadID
+}
+
 // FileProgress tracks the progress of syncing a single file.
 type FileProgress struct {
 	Path        string
@@ -99,8 +106,8 @@ func (fp *FileProgress) Snapshot() FileProgressSnapshot {
 	}
 }
 
-// SyncJob represents a download sync job.
-type SyncJob struct {
+// SyncDownload represents a download being synced.
+type SyncDownload struct {
 	ID            string // Download ID/hash
 	Name          string
 	Downloader    string
@@ -124,65 +131,65 @@ type SyncJob struct {
 	cancel context.CancelFunc
 }
 
-// GetProgress returns the current progress of the job.
+// GetProgress returns the current progress of the download sync.
 //
 //nolint:nonamedreturns // named returns document return values
-func (j *SyncJob) GetProgress() (completedSize int64, status FileStatus) {
-	j.mu.RLock()
-	defer j.mu.RUnlock()
+func (sd *SyncDownload) GetProgress() (completedSize int64, status FileStatus) {
+	sd.mu.RLock()
+	defer sd.mu.RUnlock()
 
 	var completed int64
-	for _, f := range j.Files {
+	for _, f := range sd.Files {
 		transferred, _ := f.Progress()
 		completed += transferred
 	}
 
-	return completed, j.Status
+	return completed, sd.Status
 }
 
-// Cancel cancels the sync job.
-func (j *SyncJob) Cancel() {
-	j.mu.Lock()
-	defer j.mu.Unlock()
+// Cancel cancels the download sync.
+func (sd *SyncDownload) Cancel() {
+	sd.mu.Lock()
+	defer sd.mu.Unlock()
 
-	if j.cancel != nil {
-		j.cancel()
-		j.CancelledAt = time.Now()
-		j.Status = FileStatusError
-		j.Error = context.Canceled
+	if sd.cancel != nil {
+		sd.cancel()
+		sd.CancelledAt = time.Now()
+		sd.Status = FileStatusError
+		sd.Error = context.Canceled
 	}
 }
 
-// IsCancelled returns true if the job has been cancelled.
-func (j *SyncJob) IsCancelled() bool {
-	j.mu.RLock()
-	defer j.mu.RUnlock()
-	return !j.CancelledAt.IsZero()
+// IsCancelled returns true if the download sync has been cancelled.
+func (sd *SyncDownload) IsCancelled() bool {
+	sd.mu.RLock()
+	defer sd.mu.RUnlock()
+	return !sd.CancelledAt.IsZero()
 }
 
-// Context returns the job's context.
-func (j *SyncJob) Context() context.Context {
-	return j.ctx
+// Context returns the download sync's context.
+func (sd *SyncDownload) Context() context.Context {
+	return sd.ctx
 }
 
-// UpdateDestination updates the job's final path and category.
+// UpdateDestination updates the download's final path and category.
 // This is used when a download's category changes to another tracked app while syncing.
-func (j *SyncJob) UpdateDestination(finalPath, category string) {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	j.FinalPath = finalPath
-	j.Category = category
+func (sd *SyncDownload) UpdateDestination(finalPath, category string) {
+	sd.mu.Lock()
+	defer sd.mu.Unlock()
+	sd.FinalPath = finalPath
+	sd.Category = category
 }
 
-// GetFinalPath returns the job's final path.
-func (j *SyncJob) GetFinalPath() string {
-	j.mu.RLock()
-	defer j.mu.RUnlock()
-	return j.FinalPath
+// GetFinalPath returns the download's final path.
+func (sd *SyncDownload) GetFinalPath() string {
+	sd.mu.RLock()
+	defer sd.mu.RUnlock()
+	return sd.FinalPath
 }
 
-// SyncJobSnapshot is a point-in-time snapshot of a sync job.
-type SyncJobSnapshot struct {
+// SyncDownloadSnapshot is a point-in-time snapshot of a download sync.
+type SyncDownloadSnapshot struct {
 	ID            string
 	Name          string
 	Downloader    string
@@ -195,18 +202,18 @@ type SyncJobSnapshot struct {
 	CompletedSize int64
 	Status        FileStatus
 	Files         []FileProgressSnapshot
-	BytesPerSec   int64 // Job-level transfer speed
+	BytesPerSec   int64 // Transfer speed
 }
 
-// Snapshot returns a point-in-time snapshot of the job.
-func (j *SyncJob) Snapshot() SyncJobSnapshot {
-	j.mu.RLock()
-	defer j.mu.RUnlock()
+// Snapshot returns a point-in-time snapshot of the download sync.
+func (sd *SyncDownload) Snapshot() SyncDownloadSnapshot {
+	sd.mu.RLock()
+	defer sd.mu.RUnlock()
 
-	files := make([]FileProgressSnapshot, len(j.Files))
+	files := make([]FileProgressSnapshot, len(sd.Files))
 	var completedSize int64
 	var bytesPerSec int64
-	for i, f := range j.Files {
+	for i, f := range sd.Files {
 		files[i] = f.Snapshot()
 		completedSize += files[i].Transferred
 		// Sum speed from actively syncing files (reported by transfer backend)
@@ -215,18 +222,18 @@ func (j *SyncJob) Snapshot() SyncJobSnapshot {
 		}
 	}
 
-	return SyncJobSnapshot{
-		ID:            j.ID,
-		Name:          j.Name,
-		Downloader:    j.Downloader,
-		Category:      j.Category,
-		RemoteBase:    j.RemoteBase,
-		LocalBase:     j.LocalBase,
-		FinalPath:     j.FinalPath,
-		TotalSize:     j.TotalSize,
-		TotalFiles:    j.TotalFiles,
+	return SyncDownloadSnapshot{
+		ID:            sd.ID,
+		Name:          sd.Name,
+		Downloader:    sd.Downloader,
+		Category:      sd.Category,
+		RemoteBase:    sd.RemoteBase,
+		LocalBase:     sd.LocalBase,
+		FinalPath:     sd.FinalPath,
+		TotalSize:     sd.TotalSize,
+		TotalFiles:    sd.TotalFiles,
 		CompletedSize: completedSize,
-		Status:        j.Status,
+		Status:        sd.Status,
 		Files:         files,
 		BytesPerSec:   bytesPerSec,
 	}
@@ -245,17 +252,17 @@ type Syncer struct {
 	logger        zerolog.Logger
 	transferer    transfer.Transferer
 
-	jobs      map[string]*SyncJob
-	jobsMu    sync.RWMutex
-	semaphore chan struct{}
+	downloads   map[string]*SyncDownload
+	downloadsMu sync.RWMutex
+	semaphore   chan struct{}
 
 	// Speed history for UI sparkline (last 5 minutes)
 	speedHistory   []SpeedSample
 	speedHistoryMu sync.RWMutex
 
 	// Callbacks
-	onJobComplete  func(job *SyncJob)
-	onFileComplete func(job *SyncJob, file *FileProgress)
+	onSyncComplete func(sd *SyncDownload)
+	onFileComplete func(sd *SyncDownload, file *FileProgress)
 }
 
 // Option is a functional option for configuring the syncer.
@@ -283,15 +290,15 @@ func WithTransferer(t transfer.Transferer) Option {
 	}
 }
 
-// WithOnJobComplete sets a callback for when a job completes.
-func WithOnJobComplete(fn func(job *SyncJob)) Option {
+// WithOnSyncComplete sets a callback for when a download sync completes.
+func WithOnSyncComplete(fn func(sd *SyncDownload)) Option {
 	return func(s *Syncer) {
-		s.onJobComplete = fn
+		s.onSyncComplete = fn
 	}
 }
 
 // WithOnFileComplete sets a callback for when a file completes.
-func WithOnFileComplete(fn func(job *SyncJob, file *FileProgress)) Option {
+func WithOnFileComplete(fn func(sd *SyncDownload, file *FileProgress)) Option {
 	return func(s *Syncer) {
 		s.onFileComplete = fn
 	}
@@ -303,7 +310,7 @@ func New(syncingPath string, opts ...Option) *Syncer {
 		syncingPath:   syncingPath,
 		maxConcurrent: defaultMaxConcurrent,
 		logger:        zerolog.Nop(),
-		jobs:          make(map[string]*SyncJob),
+		downloads:     make(map[string]*SyncDownload),
 		semaphore:     make(chan struct{}, defaultMaxConcurrent),
 	}
 
@@ -330,20 +337,21 @@ func (s *Syncer) Close() error {
 	return nil
 }
 
-// CreateJob creates a new sync job for a download.
-func (s *Syncer) CreateJob(dl *download.Download, downloaderName, finalPath string) *SyncJob {
-	s.jobsMu.Lock()
-	defer s.jobsMu.Unlock()
+// CreateSyncDownload creates a new sync download for tracking.
+func (s *Syncer) CreateSyncDownload(dl *download.Download, downloaderName, finalPath string) *SyncDownload {
+	s.downloadsMu.Lock()
+	defer s.downloadsMu.Unlock()
 
-	// Check if job already exists
-	if job, ok := s.jobs[dl.ID]; ok {
-		return job
+	// Check if download already exists (keyed by downloader:id for uniqueness)
+	key := syncKey(downloaderName, dl.ID)
+	if sd, ok := s.downloads[key]; ok {
+		return sd
 	}
 
-	// Create per-job context for cancellation
+	// Create per-download context for cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 
-	job := &SyncJob{
+	sd := &SyncDownload{
 		ID:         dl.ID,
 		Name:       dl.Name,
 		Downloader: downloaderName,
@@ -364,10 +372,36 @@ func (s *Syncer) CreateJob(dl *download.Download, downloaderName, finalPath stri
 			continue // Skip files not selected for download
 		}
 
+		// Validate file paths to prevent path traversal attacks
+		remotePath, err := fileutil.SafeJoin(dl.SavePath, f.Path)
+		if err != nil {
+			s.logger.Warn().
+				Str("file", f.Path).
+				Err(err).
+				Msg("skipping file with invalid path")
+			continue
+		}
+		localPath, err := fileutil.SafeJoin(sd.LocalBase, f.Path)
+		if err != nil {
+			s.logger.Warn().
+				Str("file", f.Path).
+				Err(err).
+				Msg("skipping file with invalid path")
+			continue
+		}
+		finalFilePath, err := fileutil.SafeJoin(finalPath, f.Path)
+		if err != nil {
+			s.logger.Warn().
+				Str("file", f.Path).
+				Err(err).
+				Msg("skipping file with invalid path")
+			continue
+		}
+
 		fp := &FileProgress{
 			Path:       f.Path,
-			RemotePath: filepath.Join(dl.SavePath, f.Path),
-			LocalPath:  filepath.Join(job.LocalBase, f.Path),
+			RemotePath: remotePath,
+			LocalPath:  localPath,
 			Size:       f.Size,
 			Status:     FileStatusPending,
 		}
@@ -375,8 +409,7 @@ func (s *Syncer) CreateJob(dl *download.Download, downloaderName, finalPath stri
 		// Check if file already exists at final destination with correct size
 		// This handles the case where a restart happens after sync but before cleanup
 		// Note: f.Path already includes the torrent name as the first component
-		finalFilePath := filepath.Join(finalPath, f.Path)
-		if info, err := os.Stat(finalFilePath); err == nil && info.Size() == f.Size {
+		if info, statErr := os.Stat(finalFilePath); statErr == nil && info.Size() == f.Size {
 			fp.Status = FileStatusSkipped
 			fp.Transferred = f.Size
 			s.logger.Debug().
@@ -388,33 +421,34 @@ func (s *Syncer) CreateJob(dl *download.Download, downloaderName, finalPath stri
 			fp.Status = FileStatusPending
 		}
 
-		job.Files = append(job.Files, fp)
-		job.TotalSize += f.Size
-		job.TotalFiles++
+		sd.Files = append(sd.Files, fp)
+		sd.TotalSize += f.Size
+		sd.TotalFiles++
 	}
 
-	s.jobs[dl.ID] = job
-	return job
+	s.downloads[key] = sd
+	return sd
 }
 
-// GetJob returns a job by ID.
-func (s *Syncer) GetJob(id string) (*SyncJob, bool) {
-	s.jobsMu.RLock()
-	defer s.jobsMu.RUnlock()
-	job, ok := s.jobs[id]
-	return job, ok
+// GetByKey returns a sync download by downloader name and download ID.
+func (s *Syncer) GetByKey(downloaderName, downloadID string) (*SyncDownload, bool) {
+	s.downloadsMu.RLock()
+	defer s.downloadsMu.RUnlock()
+
+	sd, ok := s.downloads[syncKey(downloaderName, downloadID)]
+	return sd, ok
 }
 
-// GetAllJobs returns all jobs.
-func (s *Syncer) GetAllJobs() []*SyncJob {
-	s.jobsMu.RLock()
-	defer s.jobsMu.RUnlock()
+// GetAll returns all sync downloads.
+func (s *Syncer) GetAll() []*SyncDownload {
+	s.downloadsMu.RLock()
+	defer s.downloadsMu.RUnlock()
 
-	jobs := make([]*SyncJob, 0, len(s.jobs))
-	for _, job := range s.jobs {
-		jobs = append(jobs, job)
+	downloads := make([]*SyncDownload, 0, len(s.downloads))
+	for _, sd := range s.downloads {
+		downloads = append(downloads, sd)
 	}
-	return jobs
+	return downloads
 }
 
 // RecordSpeed adds a speed sample to the history (called by API on each poll).
@@ -458,7 +492,7 @@ func (s *Syncer) GetAggregateSpeed() int64 {
 // SyncFile syncs a single file from remote to local.
 //
 //nolint:funlen // file sync requires multiple phases
-func (s *Syncer) SyncFile(ctx context.Context, _ download.Downloader, job *SyncJob, file *FileProgress) error {
+func (s *Syncer) SyncFile(ctx context.Context, _ download.Downloader, sd *SyncDownload, file *FileProgress) error {
 	// Acquire semaphore
 	select {
 	case s.semaphore <- struct{}{}:
@@ -478,7 +512,7 @@ func (s *Syncer) SyncFile(ctx context.Context, _ download.Downloader, job *SyncJ
 	}
 
 	s.logger.Debug().
-		Str("job", job.ID).
+		Str("download", sd.ID).
 		Str("file", file.Path).
 		Str("remote", file.RemotePath).
 		Int64("size", file.Size).
@@ -560,7 +594,7 @@ func (s *Syncer) SyncFile(ctx context.Context, _ download.Downloader, job *SyncJ
 	file.mu.Unlock()
 
 	s.logger.Info().
-		Str("job", job.ID).
+		Str("download", sd.ID).
 		Str("file", file.Path).
 		Int64("size", file.Size).
 		Int64("bps", file.BytesPerSec).
@@ -568,40 +602,40 @@ func (s *Syncer) SyncFile(ctx context.Context, _ download.Downloader, job *SyncJ
 
 	// Trigger callback
 	if s.onFileComplete != nil {
-		s.onFileComplete(job, file)
+		s.onFileComplete(sd, file)
 	}
 
 	return nil
 }
 
-// SyncJob syncs all ready files in a job.
+// Sync syncs all ready files for a download.
 //
 //nolint:gocognit,funlen // sync logic requires multiple phases and error handling paths
-func (s *Syncer) SyncJob(ctx context.Context, dl download.Downloader, job *SyncJob) error {
-	// Check if job is already cancelled
-	if job.IsCancelled() {
+func (s *Syncer) Sync(ctx context.Context, dl download.Downloader, sd *SyncDownload) error {
+	// Check if download sync is already cancelled
+	if sd.IsCancelled() {
 		return context.Canceled
 	}
 
-	// Use the job's context for cancellation, but also respect the parent context
+	// Use the download's context for cancellation, but also respect the parent context
 	// Create a merged context that cancels if either is cancelled
-	jobCtx := job.Context()
+	sdCtx := sd.Context()
 	mergedCtx, mergedCancel := context.WithCancel(ctx)
 	defer mergedCancel()
 
-	// Watch for job cancellation
+	// Watch for download sync cancellation
 	go func() {
 		select {
-		case <-jobCtx.Done():
+		case <-sdCtx.Done():
 			mergedCancel()
 		case <-mergedCtx.Done():
 		}
 	}()
 
-	job.mu.Lock()
-	job.Status = FileStatusSyncing
-	job.StartedAt = time.Now()
-	job.mu.Unlock()
+	sd.mu.Lock()
+	sd.Status = FileStatusSyncing
+	sd.StartedAt = time.Now()
+	sd.mu.Unlock()
 
 	backendName := "unknown"
 	if s.transferer != nil {
@@ -609,14 +643,14 @@ func (s *Syncer) SyncJob(ctx context.Context, dl download.Downloader, job *SyncJ
 	}
 
 	s.logger.Info().
-		Str("id", job.ID).
-		Str("name", job.Name).
-		Int("files", job.TotalFiles).
+		Str("id", sd.ID).
+		Str("name", sd.Name).
+		Int("files", sd.TotalFiles).
 		Str("backend", backendName).
-		Msg("starting job sync")
+		Msg("starting download sync")
 
 	// Get current file states from downloader
-	files, err := dl.GetFiles(mergedCtx, job.ID)
+	files, err := dl.GetFiles(mergedCtx, sd.ID)
 	if err != nil {
 		return fmt.Errorf("failed to get file states: %w", err)
 	}
@@ -629,9 +663,9 @@ func (s *Syncer) SyncJob(ctx context.Context, dl download.Downloader, job *SyncJ
 
 	// Sync files that are complete in the download
 	var wg sync.WaitGroup
-	errChan := make(chan error, len(job.Files))
+	errChan := make(chan error, len(sd.Files))
 
-	for _, file := range job.Files {
+	for _, file := range sd.Files {
 		// Check if file is complete in downloader
 		if state, ok := fileStates[file.Path]; ok && state != download.FileStateComplete {
 			s.logger.Debug().
@@ -653,7 +687,7 @@ func (s *Syncer) SyncJob(ctx context.Context, dl download.Downloader, job *SyncJ
 		wg.Add(1)
 		go func(f *FileProgress) {
 			defer wg.Done()
-			if syncErr := s.SyncFile(mergedCtx, dl, job, f); syncErr != nil {
+			if syncErr := s.SyncFile(mergedCtx, dl, sd, f); syncErr != nil {
 				errChan <- fmt.Errorf("file %s: %w", f.Path, syncErr)
 			}
 		}(file)
@@ -665,13 +699,13 @@ func (s *Syncer) SyncJob(ctx context.Context, dl download.Downloader, job *SyncJ
 	// Check for errors
 	var syncErrors []error
 	for err := range errChan {
-		s.logger.Error().Err(err).Str("job", job.ID).Msg("file sync error")
+		s.logger.Error().Err(err).Str("download", sd.ID).Msg("file sync error")
 		syncErrors = append(syncErrors, err)
 	}
 
 	// Check if all files are complete
 	allComplete := true
-	for _, f := range job.Files {
+	for _, f := range sd.Files {
 		f.mu.RLock()
 		status := f.Status
 		f.mu.RUnlock()
@@ -682,28 +716,28 @@ func (s *Syncer) SyncJob(ctx context.Context, dl download.Downloader, job *SyncJ
 		}
 	}
 
-	job.mu.Lock()
+	sd.mu.Lock()
 	switch {
 	case len(syncErrors) > 0:
-		job.Status = FileStatusError
-		job.Error = fmt.Errorf("sync errors: %v", syncErrors)
+		sd.Status = FileStatusError
+		sd.Error = fmt.Errorf("sync errors: %v", syncErrors)
 	case allComplete:
-		job.Status = FileStatusComplete
-		job.CompletedAt = time.Now()
+		sd.Status = FileStatusComplete
+		sd.CompletedAt = time.Now()
 	default:
 		// Some files still pending (not yet complete in downloader)
-		job.Status = FileStatusPending
+		sd.Status = FileStatusPending
 	}
-	job.mu.Unlock()
+	sd.mu.Unlock()
 
 	if allComplete {
 		s.logger.Info().
-			Str("id", job.ID).
-			Str("name", job.Name).
-			Msg("job sync complete")
+			Str("id", sd.ID).
+			Str("name", sd.Name).
+			Msg("download sync complete")
 
-		if s.onJobComplete != nil {
-			s.onJobComplete(job)
+		if s.onSyncComplete != nil {
+			s.onSyncComplete(sd)
 		}
 	}
 
@@ -711,20 +745,20 @@ func (s *Syncer) SyncJob(ctx context.Context, dl download.Downloader, job *SyncJ
 }
 
 // MoveToFinal moves synced files from staging to final destination.
-func (s *Syncer) MoveToFinal(job *SyncJob) error {
+func (s *Syncer) MoveToFinal(sd *SyncDownload) error {
 	s.logger.Info().
-		Str("id", job.ID).
-		Str("from", job.LocalBase).
-		Str("to", job.FinalPath).
+		Str("id", sd.ID).
+		Str("from", sd.LocalBase).
+		Str("to", sd.FinalPath).
 		Msg("moving to final destination")
 
 	// Create final directory
-	if err := os.MkdirAll(job.FinalPath, 0750); err != nil {
+	if err := os.MkdirAll(sd.FinalPath, 0750); err != nil {
 		return fmt.Errorf("failed to create final directory: %w", err)
 	}
 
 	// Move each file
-	for _, file := range job.Files {
+	for _, file := range sd.Files {
 		file.mu.RLock()
 		status := file.Status
 		file.mu.RUnlock()
@@ -733,7 +767,7 @@ func (s *Syncer) MoveToFinal(job *SyncJob) error {
 			continue
 		}
 
-		finalFilePath := filepath.Join(job.FinalPath, file.Path)
+		finalFilePath := filepath.Join(sd.FinalPath, file.Path)
 
 		// Create parent directory
 		if err := os.MkdirAll(filepath.Dir(finalFilePath), 0750); err != nil {
@@ -751,39 +785,44 @@ func (s *Syncer) MoveToFinal(job *SyncJob) error {
 	}
 
 	// Clean up staging directory
-	_ = os.RemoveAll(job.LocalBase)
+	_ = os.RemoveAll(sd.LocalBase)
 
 	return nil
 }
 
-// CancelJob cancels a sync job and cleans up its staging files.
-func (s *Syncer) CancelJob(id string) error {
-	s.jobsMu.Lock()
-	job, ok := s.jobs[id]
-	s.jobsMu.Unlock()
+// CancelByKey cancels a sync download by downloader name and download ID.
+func (s *Syncer) CancelByKey(downloaderName, downloadID string) error {
+	s.downloadsMu.RLock()
+	sd, ok := s.downloads[syncKey(downloaderName, downloadID)]
+	s.downloadsMu.RUnlock()
 
 	if !ok {
 		return nil
 	}
 
-	// Cancel the job's context to stop any ongoing syncing
-	job.Cancel()
+	return s.cancelInternal(sd)
+}
+
+// cancelInternal performs the actual sync download cancellation.
+func (s *Syncer) cancelInternal(sd *SyncDownload) error {
+	// Cancel the download's context to stop any ongoing syncing
+	sd.Cancel()
 
 	s.logger.Info().
-		Str("id", id).
-		Str("name", job.Name).
-		Msg("cancelled sync job")
+		Str("id", sd.ID).
+		Str("name", sd.Name).
+		Msg("cancelled download sync")
 
 	// Clean up staging directory
-	if job.LocalBase != "" {
-		if err := os.RemoveAll(job.LocalBase); err != nil {
+	if sd.LocalBase != "" {
+		if err := os.RemoveAll(sd.LocalBase); err != nil {
 			s.logger.Warn().
 				Err(err).
-				Str("path", job.LocalBase).
+				Str("path", sd.LocalBase).
 				Msg("failed to cleanup staging directory")
 		} else {
 			s.logger.Debug().
-				Str("path", job.LocalBase).
+				Str("path", sd.LocalBase).
 				Msg("cleaned up staging directory")
 		}
 	}
@@ -791,9 +830,9 @@ func (s *Syncer) CancelJob(id string) error {
 	return nil
 }
 
-// RemoveJob removes a job from tracking.
-func (s *Syncer) RemoveJob(id string) {
-	s.jobsMu.Lock()
-	defer s.jobsMu.Unlock()
-	delete(s.jobs, id)
+// RemoveByKey removes a sync download from tracking by downloader name and download ID.
+func (s *Syncer) RemoveByKey(downloaderName, downloadID string) {
+	s.downloadsMu.Lock()
+	defer s.downloadsMu.Unlock()
+	delete(s.downloads, syncKey(downloaderName, downloadID))
 }

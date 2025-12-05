@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="night">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +8,15 @@
     <link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css" />
     <link href="https://cdn.jsdelivr.net/npm/daisyui@5/themes.css" rel="stylesheet" type="text/css" />
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script>
+        // Set theme early to prevent flash of wrong theme
+        // NOTE: Theme names must match THEMES in js/config.js
+        (function() {
+            var pref = localStorage.getItem('themePreference') || 'system';
+            var isDark = pref === 'dark' || (pref === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+            document.documentElement.setAttribute('data-theme', isDark ? 'dim' : 'cupcake');
+        })();
+    </script>
     <style>
         @keyframes pulse-opacity {
             0%, 100% { opacity: 1; }

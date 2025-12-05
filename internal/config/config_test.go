@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/seedreap/seedreap/internal/config"
+	testutil "github.com/seedreap/seedreap/internal/testing"
 )
 
 // loadConfigFromYAML creates a temp config file and loads it using Load().
@@ -145,7 +147,7 @@ func TestDownloaderConfig(t *testing.T) {
 	tests := []struct {
 		name  string
 		yaml  string
-		check func(t *testing.T, cfg config.Config)
+		check func(t *testing.T, cfg config.Config, sshFiles testutil.TestSSHFiles)
 	}{
 		{
 			name: "single qbittorrent downloader",
@@ -160,10 +162,10 @@ downloaders:
       host: seedbox.example.com
       port: 22
       user: seeduser
-      keyFile: /path/to/key
+      keyFile: {{KEY_FILE}}
       ignoreHostKey: true
 `,
-			check: func(t *testing.T, cfg config.Config) {
+			check: func(t *testing.T, cfg config.Config, sshFiles testutil.TestSSHFiles) {
 				require.Len(t, cfg.Downloaders, 1)
 				require.Contains(t, cfg.Downloaders, "seedbox")
 
@@ -175,7 +177,7 @@ downloaders:
 				assert.Equal(t, "seedbox.example.com", dl.SSH.Host)
 				assert.Equal(t, 22, dl.SSH.Port)
 				assert.Equal(t, "seeduser", dl.SSH.User)
-				assert.Equal(t, "/path/to/key", dl.SSH.KeyFile)
+				assert.Equal(t, sshFiles.KeyFile, dl.SSH.KeyFile)
 			},
 		},
 		{
@@ -188,7 +190,7 @@ downloaders:
     ssh:
       host: seedbox1.example.com
       user: seeduser
-      keyFile: /path/to/key
+      keyFile: {{KEY_FILE}}
       ignoreHostKey: true
   seedbox2:
     type: qbittorrent
@@ -196,10 +198,10 @@ downloaders:
     ssh:
       host: seedbox2.example.com
       user: seeduser
-      keyFile: /path/to/key
+      keyFile: {{KEY_FILE}}
       ignoreHostKey: true
 `,
-			check: func(t *testing.T, cfg config.Config) {
+			check: func(t *testing.T, cfg config.Config, _ testutil.TestSSHFiles) {
 				require.Len(t, cfg.Downloaders, 2)
 				assert.Contains(t, cfg.Downloaders, "seedbox1")
 				assert.Contains(t, cfg.Downloaders, "seedbox2")
@@ -217,10 +219,10 @@ downloaders:
     ssh:
       host: seedbox.example.com
       user: seeduser
-      keyFile: /path/to/key
+      keyFile: {{KEY_FILE}}
       ignoreHostKey: true
 `,
-			check: func(t *testing.T, cfg config.Config) {
+			check: func(t *testing.T, cfg config.Config, _ testutil.TestSSHFiles) {
 				dl := cfg.Downloaders["seedbox"]
 				// Port defaults to 22 when not specified
 				assert.Equal(t, config.DefaultSSHPort, dl.SSH.Port)
@@ -236,10 +238,10 @@ downloaders:
     ssh:
       host: seedbox.example.com
       user: seeduser
-      keyFile: /path/to/key
+      keyFile: {{KEY_FILE}}
       ignoreHostKey: true
 `,
-			check: func(t *testing.T, cfg config.Config) {
+			check: func(t *testing.T, cfg config.Config, _ testutil.TestSSHFiles) {
 				dl := cfg.Downloaders["seedbox"]
 				assert.Empty(t, dl.Username)
 				assert.Empty(t, dl.Password)
@@ -249,8 +251,11 @@ downloaders:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := loadConfigFromYAML(t, tt.yaml)
-			tt.check(t, cfg)
+			sshFiles := testutil.CreateTestSSHFiles(t)
+			yaml := strings.ReplaceAll(tt.yaml, "{{KEY_FILE}}", sshFiles.KeyFile)
+			yaml = strings.ReplaceAll(yaml, "{{KNOWN_HOSTS_FILE}}", sshFiles.KnownHostsFile)
+			cfg := loadConfigFromYAML(t, yaml)
+			tt.check(t, cfg, sshFiles)
 		})
 	}
 }
@@ -477,11 +482,11 @@ apps:
 func TestFullConfig(t *testing.T) {
 	tests := []struct {
 		name  string
-		setup func(t *testing.T) config.LoadOptions
+		setup func(t *testing.T, sshFiles testutil.TestSSHFiles) config.LoadOptions
 	}{
 		{
 			name: "from yaml file",
-			setup: func(t *testing.T) config.LoadOptions {
+			setup: func(t *testing.T, sshFiles testutil.TestSSHFiles) config.LoadOptions {
 				yaml := `
 server:
   listen: "0.0.0.0:8080"
@@ -504,7 +509,7 @@ downloaders:
       host: seedbox.example.com
       port: 2222
       user: seeduser
-      keyFile: /config/ssh/id_ed25519
+      keyFile: {{KEY_FILE}}
       ignoreHostKey: true
 
 apps:
@@ -526,6 +531,10 @@ apps:
     type: passthrough
     category: misc
 `
+				// Replace placeholders with actual paths
+				yaml = strings.ReplaceAll(yaml, "{{KEY_FILE}}", sshFiles.KeyFile)
+				yaml = strings.ReplaceAll(yaml, "{{KNOWN_HOSTS_FILE}}", sshFiles.KnownHostsFile)
+
 				// Create temp directory for config file
 				tmpDir := t.TempDir()
 				configFile := filepath.Join(tmpDir, "config.yaml")
@@ -538,7 +547,7 @@ apps:
 		},
 		{
 			name: "from environment variables",
-			setup: func(t *testing.T) config.LoadOptions {
+			setup: func(t *testing.T, sshFiles testutil.TestSSHFiles) config.LoadOptions {
 				// Set all config values via environment variables
 				// Single underscore for hierarchy (camelCase keys have no underscores)
 				envVars := map[string]string{
@@ -557,7 +566,7 @@ apps:
 					"SEEDREAP_DOWNLOADERS_SEEDBOX_SSH_HOST":           "seedbox.example.com",
 					"SEEDREAP_DOWNLOADERS_SEEDBOX_SSH_PORT":           "2222",
 					"SEEDREAP_DOWNLOADERS_SEEDBOX_SSH_USER":           "seeduser",
-					"SEEDREAP_DOWNLOADERS_SEEDBOX_SSH_KEYFILE":        "/config/ssh/id_ed25519",
+					"SEEDREAP_DOWNLOADERS_SEEDBOX_SSH_KEYFILE":        sshFiles.KeyFile,
 					"SEEDREAP_DOWNLOADERS_SEEDBOX_SSH_IGNOREHOSTKEY":  "true",
 					"SEEDREAP_APPS":                                   "sonarr,radarr-4k,misc",
 					"SEEDREAP_APPS_SONARR_TYPE":                       "sonarr",
@@ -588,7 +597,8 @@ apps:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			opts := tt.setup(t)
+			sshFiles := testutil.CreateTestSSHFiles(t)
+			opts := tt.setup(t, sshFiles)
 
 			cfg, err := config.Load(opts)
 			require.NoError(t, err, "failed to load config")
@@ -614,7 +624,7 @@ apps:
 			assert.Equal(t, "seedbox.example.com", dl.SSH.Host)
 			assert.Equal(t, 2222, dl.SSH.Port)
 			assert.Equal(t, "seeduser", dl.SSH.User)
-			assert.Equal(t, "/config/ssh/id_ed25519", dl.SSH.KeyFile)
+			assert.Equal(t, sshFiles.KeyFile, dl.SSH.KeyFile)
 
 			// Apps
 			require.Len(t, cfg.Apps, 3)
@@ -687,7 +697,7 @@ downloaders:
     ssh:
       host: seedbox.example.com
       user: seeduser
-      keyFile: /path/to/key
+      keyFile: {{KEY_FILE}}
       ignoreHostKey: true
 `,
 			errContains: `downloader "seedbox": type is required`,
@@ -701,7 +711,7 @@ downloaders:
     ssh:
       host: seedbox.example.com
       user: seeduser
-      keyFile: /path/to/key
+      keyFile: {{KEY_FILE}}
       ignoreHostKey: true
 `,
 			errContains: `downloader "seedbox": url is required`,
@@ -715,7 +725,7 @@ downloaders:
     url: http://seedbox:8080
     ssh:
       user: seeduser
-      keyFile: /path/to/key
+      keyFile: {{KEY_FILE}}
       ignoreHostKey: true
 `,
 			errContains: `downloader "seedbox": ssh.host is required`,
@@ -729,7 +739,7 @@ downloaders:
     url: http://seedbox:8080
     ssh:
       host: seedbox.example.com
-      keyFile: /path/to/key
+      keyFile: {{KEY_FILE}}
       ignoreHostKey: true
 `,
 			errContains: `downloader "seedbox": ssh.user is required`,
@@ -758,7 +768,7 @@ downloaders:
     ssh:
       host: seedbox.example.com
       user: seeduser
-      keyFile: /path/to/key
+      keyFile: {{KEY_FILE}}
 `,
 			errContains: `downloader "seedbox": ssh.knownHostsFile is required (or set ssh.ignoreHostKey to true)`,
 		},
@@ -772,8 +782,8 @@ downloaders:
     ssh:
       host: seedbox.example.com
       user: seeduser
-      keyFile: /path/to/key
-      knownHostsFile: /path/to/known_hosts
+      keyFile: {{KEY_FILE}}
+      knownHostsFile: {{KNOWN_HOSTS_FILE}}
       ignoreHostKey: true
 `,
 			errContains: `downloader "seedbox": ssh.knownHostsFile and ssh.ignoreHostKey are mutually exclusive`,
@@ -842,7 +852,8 @@ downloaders:
     ssh:
       host: seedbox.example.com
       user: seeduser
-      keyFile: /path/to/key
+      keyFile: {{KEY_FILE}}
+      ignoreHostKey: true
 `,
 			errContains: `downloader "seedbox": unknown type "unknown_type"`,
 		},
@@ -871,13 +882,122 @@ apps:
 `,
 			errContains: "url is required",
 		},
+		// New security validation tests
+		{
+			name: "downloader url with invalid scheme (file://)",
+			yaml: `
+downloaders:
+  seedbox:
+    type: qbittorrent
+    url: file:///etc/passwd
+    ssh:
+      host: seedbox.example.com
+      user: seeduser
+      keyFile: {{KEY_FILE}}
+      ignoreHostKey: true
+`,
+			errContains: `url must use http or https scheme`,
+		},
+		{
+			name: "downloader url with no scheme",
+			yaml: `
+downloaders:
+  seedbox:
+    type: qbittorrent
+    url: seedbox:8080
+    ssh:
+      host: seedbox.example.com
+      user: seeduser
+      keyFile: {{KEY_FILE}}
+      ignoreHostKey: true
+`,
+			errContains: `url must use http or https scheme`,
+		},
+		{
+			name: "app url with invalid scheme (ftp://)",
+			yaml: `
+apps:
+  sonarr:
+    type: sonarr
+    url: ftp://sonarr:8989
+    apiKey: test-key
+    category: tv
+`,
+			errContains: `url must use http or https scheme`,
+		},
+		{
+			name: "ssh host with rclone special chars (comma)",
+			yaml: `
+downloaders:
+  seedbox:
+    type: qbittorrent
+    url: http://seedbox:8080
+    ssh:
+      host: "seedbox,evil=true"
+      user: seeduser
+      keyFile: {{KEY_FILE}}
+      ignoreHostKey: true
+`,
+			errContains: `ssh.host contains invalid characters`,
+		},
+		{
+			name: "ssh user with rclone special chars (equals)",
+			yaml: `
+downloaders:
+  seedbox:
+    type: qbittorrent
+    url: http://seedbox:8080
+    ssh:
+      host: seedbox.example.com
+      user: "user=admin"
+      keyFile: {{KEY_FILE}}
+      ignoreHostKey: true
+`,
+			errContains: `ssh.user contains invalid characters`,
+		},
+		{
+			name: "ssh keyFile does not exist",
+			yaml: `
+downloaders:
+  seedbox:
+    type: qbittorrent
+    url: http://seedbox:8080
+    ssh:
+      host: seedbox.example.com
+      user: seeduser
+      keyFile: /nonexistent/path/to/key
+      ignoreHostKey: true
+`,
+			errContains: `ssh key file does not exist`,
+		},
+		{
+			name: "ssh knownHostsFile does not exist",
+			yaml: `
+downloaders:
+  seedbox:
+    type: qbittorrent
+    url: http://seedbox:8080
+    ssh:
+      host: seedbox.example.com
+      user: seeduser
+      keyFile: {{KEY_FILE}}
+      knownHostsFile: /nonexistent/known_hosts
+`,
+			errContains: `known_hosts file does not exist`,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			sshFiles := testutil.CreateTestSSHFiles(t)
+
+			// Replace placeholders with actual paths
+			yaml := strings.ReplaceAll(tt.yaml, "{{KEY_FILE}}", sshFiles.KeyFile)
+			yaml = strings.ReplaceAll(yaml, "{{KNOWN_HOSTS_FILE}}", sshFiles.KnownHostsFile)
+
 			tmpDir := t.TempDir()
 			configFile := filepath.Join(tmpDir, "config.yaml")
-			err := os.WriteFile(configFile, []byte(tt.yaml), 0644)
+			err := os.WriteFile(configFile, []byte(yaml), 0644)
 			require.NoError(t, err)
 
 			_, err = config.Load(config.LoadOptions{ConfigFile: configFile})
@@ -890,4 +1010,84 @@ apps:
 			}
 		})
 	}
+}
+
+func TestSSHKeyFilePermissions(t *testing.T) {
+	t.Run("rejects world-readable key file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create a key file with insecure permissions (world-readable)
+		keyFile := filepath.Join(tmpDir, "id_test")
+		err := os.WriteFile(keyFile, []byte("test key"), 0644)
+		require.NoError(t, err)
+
+		yaml := `
+downloaders:
+  seedbox:
+    type: qbittorrent
+    url: http://seedbox:8080
+    ssh:
+      host: seedbox.example.com
+      user: seeduser
+      keyFile: ` + keyFile + `
+      ignoreHostKey: true
+`
+		configFile := filepath.Join(tmpDir, "config.yaml")
+		err = os.WriteFile(configFile, []byte(yaml), 0644)
+		require.NoError(t, err)
+
+		_, err = config.Load(config.LoadOptions{ConfigFile: configFile})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "insecure permissions")
+	})
+
+	t.Run("accepts secure key file (0600)", func(t *testing.T) {
+		sshFiles := testutil.CreateTestSSHFiles(t) // Creates key with 0600
+
+		yaml := `
+downloaders:
+  seedbox:
+    type: qbittorrent
+    url: http://seedbox:8080
+    ssh:
+      host: seedbox.example.com
+      user: seeduser
+      keyFile: ` + sshFiles.KeyFile + `
+      ignoreHostKey: true
+`
+		tmpDir := t.TempDir()
+		configFile := filepath.Join(tmpDir, "config.yaml")
+		err := os.WriteFile(configFile, []byte(yaml), 0644)
+		require.NoError(t, err)
+
+		_, err = config.Load(config.LoadOptions{ConfigFile: configFile})
+		require.NoError(t, err)
+	})
+
+	t.Run("accepts secure key file (0400)", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create a key file with read-only permissions
+		keyFile := filepath.Join(tmpDir, "id_test")
+		err := os.WriteFile(keyFile, []byte("test key"), 0400)
+		require.NoError(t, err)
+
+		yaml := `
+downloaders:
+  seedbox:
+    type: qbittorrent
+    url: http://seedbox:8080
+    ssh:
+      host: seedbox.example.com
+      user: seeduser
+      keyFile: ` + keyFile + `
+      ignoreHostKey: true
+`
+		configFile := filepath.Join(tmpDir, "config.yaml")
+		err = os.WriteFile(configFile, []byte(yaml), 0644)
+		require.NoError(t, err)
+
+		_, err = config.Load(config.LoadOptions{ConfigFile: configFile})
+		require.NoError(t, err)
+	})
 }

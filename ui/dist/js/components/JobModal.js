@@ -25,9 +25,9 @@ export function openJobModal(job) {
     modalState.job = job;
     modalState.loading = true;
 
-    // Fetch job details and timeline
+    // Fetch download details and timeline
     Promise.all([
-        fetchJobDetails(job.id),
+        fetchJobDetails(job.id, job.downloader),
         timeline.events.length === 0 ? fetchTimeline() : Promise.resolve()
     ]).finally(() => {
         modalState.loading = false;
@@ -195,8 +195,8 @@ const JobModal = {
     view: () => {
         if (!modalState.isOpen || !modalState.job) return null;
 
-        // Get fresh job data from the list
-        const job = jobs.list.find(j => j.id === modalState.job.id) || modalState.job;
+        // Get fresh download data from the list
+        const job = jobs.list.find(j => j.id === modalState.job.id && j.downloader === modalState.job.downloader) || modalState.job;
         const displayState = getDisplayState(job);
         const progressInfo = getJobProgress(job);
 

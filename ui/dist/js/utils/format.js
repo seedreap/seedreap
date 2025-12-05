@@ -1,7 +1,9 @@
 // Formatting utility functions
 
+import { STORAGE_KEYS } from '../config.js';
+
 // Speed unit preference: 'bytes' (MB/s) or 'bits' (Mbps)
-let speedUnit = localStorage.getItem('speedUnit') || 'bytes';
+let speedUnit = localStorage.getItem(STORAGE_KEYS.speedUnit) || 'bytes';
 
 export function getSpeedUnit() {
     return speedUnit;
@@ -9,12 +11,12 @@ export function getSpeedUnit() {
 
 export function setSpeedUnit(unit) {
     speedUnit = unit;
-    localStorage.setItem('speedUnit', unit);
+    localStorage.setItem(STORAGE_KEYS.speedUnit, unit);
 }
 
 export function toggleSpeedUnit() {
     speedUnit = speedUnit === 'bytes' ? 'bits' : 'bytes';
-    localStorage.setItem('speedUnit', speedUnit);
+    localStorage.setItem(STORAGE_KEYS.speedUnit, speedUnit);
     return speedUnit;
 }
 

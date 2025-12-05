@@ -20,57 +20,66 @@ export async function fetchStats() {
     }
 }
 
-// Fetch all jobs
+// Fetch all downloads
 export async function fetchJobs() {
     try {
-        const newJobs = await m.request({ url: '/api/jobs' });
+        const newJobs = await m.request({ url: '/api/downloads' });
 
-        // Preserve files data from cached jobs
+        // Preserve files data from cached downloads
         for (const job of newJobs) {
-            const cached = jobs.list.find(j => j.id === job.id);
+            const cached = jobs.list.find(j => j.id === job.id && j.downloader === job.downloader);
             if (cached && cached.files) {
                 job.files = cached.files;
             }
         }
 
-        // Fetch files for syncing jobs that don't have them yet
+        // Fetch files for syncing downloads that don't have them yet
         for (const job of newJobs) {
             if (job.status === 'syncing' && !job.files) {
                 try {
-                    const detail = await m.request({ url: `/api/jobs/${job.id}` });
+                    const detail = await m.request({ url: `/api/downloaders/${job.downloader}/downloads/${job.id}` });
                     job.files = detail.files || [];
                 } catch (e) {
-                    console.error('Failed to fetch job details:', e);
+                    console.error('Failed to fetch download details:', e);
                 }
             }
         }
 
         jobs.list = newJobs;
     } catch (e) {
-        console.error('Failed to fetch jobs:', e);
+        console.error('Failed to fetch downloads:', e);
     }
 }
 
-// Fetch job details (files)
-export async function fetchJobDetails(jobId) {
+// Fetch download details (files)
+export async function fetchJobDetails(jobId, downloader) {
     try {
-        const detail = await m.request({ url: `/api/jobs/${jobId}` });
-        const job = jobs.list.find(j => j.id === jobId);
+        // If downloader is not provided, try to find it from the jobs list
+        if (!downloader) {
+            const job = jobs.list.find(j => j.id === jobId);
+            downloader = job?.downloader;
+        }
+        if (!downloader) {
+            console.error('No downloader found for job:', jobId);
+            return null;
+        }
+        const detail = await m.request({ url: `/api/downloaders/${downloader}/downloads/${jobId}` });
+        const job = jobs.list.find(j => j.id === jobId && j.downloader === downloader);
         if (job) {
             job.files = detail.files || [];
         }
         return detail;
     } catch (e) {
-        console.error('Failed to fetch job details:', e);
+        console.error('Failed to fetch download details:', e);
         return null;
     }
 }
 
-// Refresh files for syncing jobs
+// Refresh files for syncing downloads
 export async function refreshSyncingJobFiles() {
     for (const job of jobs.list) {
         if (job.status === 'syncing') {
-            await fetchJobDetails(job.id);
+            await fetchJobDetails(job.id, job.downloader);
         }
     }
 }

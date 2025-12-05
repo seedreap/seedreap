@@ -51,7 +51,7 @@ type TrackedDownload struct {
 	DownloaderName   string
 	OriginalCategory string // Category when first discovered, used to detect post-import category changes
 	State            DownloadState
-	SyncJob          *filesync.SyncJob
+	SyncDownload     *filesync.SyncDownload
 	Apps             []app.App
 	Error            error
 	DiscoveredAt     time.Time
@@ -89,11 +89,11 @@ func (td *TrackedDownload) GetTimes() (discoveredAt, completedAt time.Time) {
 	return td.DiscoveredAt, td.CompletedAt
 }
 
-// GetSyncJob returns the sync job.
-func (td *TrackedDownload) GetSyncJob() *filesync.SyncJob {
+// GetSyncDownload returns the sync download.
+func (td *TrackedDownload) GetSyncDownload() *filesync.SyncDownload {
 	td.mu.RLock()
 	defer td.mu.RUnlock()
-	return td.SyncJob
+	return td.SyncDownload
 }
 
 // Orchestrator coordinates the sync pipeline.
@@ -530,7 +530,7 @@ func (o *Orchestrator) startSyncing(tracked *TrackedDownload, dl download.Downlo
 	}
 
 	// Create sync job
-	tracked.SyncJob = o.syncer.CreateJob(tracked.Download, tracked.DownloaderName, finalPath)
+	tracked.SyncDownload = o.syncer.CreateSyncDownload(tracked.Download, tracked.DownloaderName, finalPath)
 	tracked.State = StateSyncing
 
 	o.logger.Info().
@@ -554,7 +554,7 @@ func (o *Orchestrator) startSyncing(tracked *TrackedDownload, dl download.Downlo
 
 	// Start sync in background - track in WaitGroup so Stop() waits for completion
 	o.wg.Go(func() {
-		if syncErr := o.syncer.SyncJob(o.ctx, dl, tracked.SyncJob); syncErr != nil {
+		if syncErr := o.syncer.Sync(o.ctx, dl, tracked.SyncDownload); syncErr != nil {
 			o.logger.Error().Err(syncErr).Str("download", tracked.Download.Name).Msg("sync error")
 		}
 	})
@@ -576,7 +576,15 @@ func (o *Orchestrator) checkFilesAtFinal(
 
 		// Build the final file path (matches MoveToFinal logic)
 		// Note: f.Path already includes the torrent name as the first component
-		finalFilePath := filepath.Join(finalPath, f.Path)
+		// Use SafeJoin to prevent path traversal attacks
+		finalFilePath, err := fileutil.SafeJoin(finalPath, f.Path)
+		if err != nil {
+			o.logger.Warn().
+				Str("file", f.Path).
+				Err(err).
+				Msg("skipping file with invalid path")
+			continue
+		}
 
 		info, err := os.Stat(finalFilePath)
 		if err != nil {
@@ -609,13 +617,13 @@ func (o *Orchestrator) continueSyncing(tracked *TrackedDownload, dl download.Dow
 	tracked.mu.Lock()
 	defer tracked.mu.Unlock()
 
-	if tracked.SyncJob == nil {
+	if tracked.SyncDownload == nil {
 		tracked.State = StateDiscovered
 		return
 	}
 
 	// Get current progress
-	completedSize, status := tracked.SyncJob.GetProgress()
+	completedSize, status := tracked.SyncDownload.GetProgress()
 
 	switch status {
 	case filesync.FileStatusComplete:
@@ -639,7 +647,7 @@ func (o *Orchestrator) continueSyncing(tracked *TrackedDownload, dl download.Dow
 
 	case filesync.FileStatusError:
 		tracked.State = StateError
-		tracked.Error = tracked.SyncJob.Error
+		tracked.Error = tracked.SyncDownload.Error
 		o.logger.Error().
 			Err(tracked.Error).
 			Str("download", tracked.Download.Name).
@@ -678,7 +686,7 @@ func (o *Orchestrator) continueSyncing(tracked *TrackedDownload, dl download.Dow
 
 		// Track in WaitGroup so Stop() waits for completion
 		o.wg.Go(func() {
-			if err := o.syncer.SyncJob(o.ctx, dl, tracked.SyncJob); err != nil {
+			if err := o.syncer.Sync(o.ctx, dl, tracked.SyncDownload); err != nil {
 				o.logger.Error().Err(err).Str("download", tracked.Download.Name).Msg("sync error")
 			}
 		})
@@ -692,7 +700,7 @@ func (o *Orchestrator) continueSyncing(tracked *TrackedDownload, dl download.Dow
 func (o *Orchestrator) moveToFinal(tracked *TrackedDownload) {
 	tracked.mu.Lock()
 	tracked.State = StateMoving
-	job := tracked.SyncJob
+	job := tracked.SyncDownload
 	tracked.mu.Unlock()
 
 	if job == nil {
@@ -738,7 +746,7 @@ func (o *Orchestrator) moveToFinal(tracked *TrackedDownload) {
 func (o *Orchestrator) triggerImport(tracked *TrackedDownload) {
 	tracked.mu.Lock()
 	apps := tracked.Apps
-	job := tracked.SyncJob
+	job := tracked.SyncDownload
 	downloadID := tracked.Download.ID
 	downloadName := tracked.Download.Name
 	downloaderName := tracked.DownloaderName
@@ -817,8 +825,8 @@ func (o *Orchestrator) cleanup(tracked *TrackedDownload) {
 		delete(o.tracked, key)
 		o.trackedMu.Unlock()
 
-		if tracked.SyncJob != nil {
-			o.syncer.RemoveJob(tracked.Download.ID)
+		if tracked.SyncDownload != nil {
+			o.syncer.RemoveByKey(tracked.DownloaderName, tracked.Download.ID)
 		}
 	}
 }
@@ -908,7 +916,7 @@ func (o *Orchestrator) handleDownloadRemoved(tracked *TrackedDownload, key strin
 	downloadName := tracked.Download.Name
 	downloadID := tracked.Download.ID
 	apps := tracked.Apps
-	job := tracked.SyncJob
+	job := tracked.SyncDownload
 	state := tracked.State
 	downloaderName := tracked.DownloaderName
 	tracked.mu.RUnlock()
@@ -936,7 +944,7 @@ func (o *Orchestrator) handleDownloadRemoved(tracked *TrackedDownload, key strin
 		o.logger.Info().
 			Str("download", downloadName).
 			Msg("cancelling incomplete sync")
-		if err := o.syncer.CancelJob(downloadID); err != nil {
+		if err := o.syncer.CancelByKey(downloaderName, downloadID); err != nil {
 			o.logger.Warn().Err(err).Str("download", downloadName).Msg("error cancelling sync job")
 		}
 		// CancelJob cleans up staging files, now cleanup any final files if they exist
@@ -967,7 +975,7 @@ func (o *Orchestrator) handleCategoryChanged(tracked *TrackedDownload, key strin
 	downloadID := tracked.Download.ID
 	originalCategory := tracked.OriginalCategory
 	apps := tracked.Apps
-	job := tracked.SyncJob
+	job := tracked.SyncDownload
 	state := tracked.State
 	downloaderName := tracked.DownloaderName
 	tracked.mu.RUnlock()
@@ -1016,7 +1024,7 @@ func (o *Orchestrator) handleCategoryChanged(tracked *TrackedDownload, key strin
 		o.logger.Info().
 			Str("download", downloadName).
 			Msg("cancelling incomplete sync due to category change to untracked category")
-		if err := o.syncer.CancelJob(downloadID); err != nil {
+		if err := o.syncer.CancelByKey(downloaderName, downloadID); err != nil {
 			o.logger.Warn().Err(err).Str("download", downloadName).Msg("error cancelling sync job")
 		}
 		o.cleanupSyncedFiles(tracked, "category changed while syncing")
@@ -1047,7 +1055,7 @@ func (o *Orchestrator) handleCategoryMigrationWhileSyncing(
 ) {
 	tracked.mu.Lock()
 	downloadName := tracked.Download.Name
-	job := tracked.SyncJob
+	job := tracked.SyncDownload
 	oldApps := tracked.Apps
 
 	// Update the tracked download to use the new apps
@@ -1086,7 +1094,7 @@ func appNames(apps []app.App) []string {
 func (o *Orchestrator) handleCategoryMigration(tracked *TrackedDownload, key string, _ string, newApps []app.App) {
 	tracked.mu.RLock()
 	downloadName := tracked.Download.Name
-	job := tracked.SyncJob
+	job := tracked.SyncDownload
 	apps := tracked.Apps
 	tracked.mu.RUnlock()
 
@@ -1183,7 +1191,7 @@ func (o *Orchestrator) handleCategoryMigration(tracked *TrackedDownload, key str
 // cleanupSyncedFiles removes the synced files for a tracked download.
 func (o *Orchestrator) cleanupSyncedFiles(tracked *TrackedDownload, reason string) {
 	tracked.mu.RLock()
-	job := tracked.SyncJob
+	job := tracked.SyncDownload
 	downloadName := tracked.Download.Name
 	downloadID := tracked.Download.ID
 	downloaderName := tracked.DownloaderName
@@ -1227,7 +1235,8 @@ func (o *Orchestrator) cleanupSyncedFiles(tracked *TrackedDownload, reason strin
 func (o *Orchestrator) removeFromTracking(tracked *TrackedDownload, key string) {
 	tracked.mu.RLock()
 	downloadID := tracked.Download.ID
-	syncJob := tracked.SyncJob
+	downloaderName := tracked.DownloaderName
+	syncJob := tracked.SyncDownload
 	tracked.mu.RUnlock()
 
 	o.trackedMu.Lock()
@@ -1235,7 +1244,7 @@ func (o *Orchestrator) removeFromTracking(tracked *TrackedDownload, key string) 
 	o.trackedMu.Unlock()
 
 	if syncJob != nil {
-		o.syncer.RemoveJob(downloadID)
+		o.syncer.RemoveByKey(downloaderName, downloadID)
 	}
 }
 
@@ -1284,16 +1293,16 @@ func (o *Orchestrator) GetStats() map[string]any {
 		td.mu.RLock()
 		state := td.State
 		dlState := td.Download.State
-		syncJob := td.SyncJob
+		syncDownload := td.SyncDownload
 		td.mu.RUnlock()
 
-		// For consistency with the jobs API, use sync job status when available
+		// For consistency with the downloads API, use sync download status when available
 		// This ensures stats reflect the actual current state shown in the UI
 		effectiveState := string(state)
-		if syncJob != nil && state == StateSyncing {
-			// Check the sync job's actual status
-			_, jobStatus := syncJob.GetProgress()
-			switch jobStatus {
+		if syncDownload != nil && state == StateSyncing {
+			// Check the sync download's actual status
+			_, syncStatus := syncDownload.GetProgress()
+			switch syncStatus {
 			case filesync.FileStatusError:
 				effectiveState = string(StateError)
 			case filesync.FileStatusComplete:

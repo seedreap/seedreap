@@ -560,14 +560,14 @@ func TestCategoryChangedToTrackedApp_WhileSyncing(t *testing.T) {
 	td := to.getTrackedDownload("hash1")
 	require.NotNil(t, td, "download should still be tracked")
 
-	job := td.GetSyncJob()
+	job := td.GetSyncDownload()
 	require.NotNil(t, job, "sync job should exist")
 	assert.Contains(t, job.GetFinalPath(), radarrApp.DownloadsPath(),
 		"job should be redirected to new app path")
 }
 
 // TestCategoryChangedToTrackedApp_AfterRestart tests that category changes are handled
-// correctly when a download was already synced (no SyncJob exists because files already
+// correctly when a download was already synced (no SyncDownload exists because files already
 // existed at destination). This simulates the scenario after a restart where files are
 // already present.
 func TestCategoryChangedToTrackedApp_AfterRestart(t *testing.T) {
@@ -580,7 +580,7 @@ func TestCategoryChangedToTrackedApp_AfterRestart(t *testing.T) {
 	dl, _ := createTestDownload("hash1", "TestShow.S01E01", "tv-sonarr")
 
 	// Pre-create the files at the final destination to simulate already-synced state
-	// This is what happens after a restart - files exist, so no SyncJob is created
+	// This is what happens after a restart - files exist, so no SyncDownload is created
 	sonarrFinalPath := filepath.Join(to.downloadsPath, "tv-sonarr", dl.Name)
 	require.NoError(t, os.MkdirAll(sonarrFinalPath, 0750))
 	sonarrFilePath := filepath.Join(sonarrFinalPath, "file1.mkv")
@@ -596,10 +596,10 @@ func TestCategoryChangedToTrackedApp_AfterRestart(t *testing.T) {
 	require.True(t, to.waitForState("hash1", orchestrator.StateComplete, 2*time.Second),
 		"download should reach complete state (files already exist)")
 
-	// Verify no SyncJob was created (this is the key condition for the bug)
+	// Verify no SyncDownload was created (this is the key condition for the bug)
 	td := to.getTrackedDownload("hash1")
 	require.NotNil(t, td, "download should be tracked")
-	assert.Nil(t, td.GetSyncJob(), "sync job should be nil when files already exist")
+	assert.Nil(t, td.GetSyncDownload(), "sync job should be nil when files already exist")
 
 	// Now change category - this should still migrate the files
 	to.mockDL.SetCategory("hash1", "movies")
@@ -934,7 +934,7 @@ func TestFilesAlreadyExist(t *testing.T) {
 		// Verify no sync job was created
 		td := to.getTrackedDownload("hash1")
 		require.NotNil(t, td)
-		assert.Nil(t, td.GetSyncJob(), "sync job should not be created when files exist")
+		assert.Nil(t, td.GetSyncDownload(), "sync job should not be created when files exist")
 
 		// Verify no transfers were attempted
 		assert.Empty(t, to.mockTransfer.GetTransferCalls(), "no transfers should occur")
@@ -1176,7 +1176,7 @@ func TestTrackedDownloadThreadSafety(t *testing.T) {
 						_ = td.GetDownload()
 						_ = td.GetError()
 						_, _ = td.GetTimes()
-						_ = td.GetSyncJob()
+						_ = td.GetSyncDownload()
 					}
 				}
 				done <- struct{}{}

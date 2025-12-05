@@ -147,7 +147,7 @@ const SidebarContent = {
         return m('.bg-base-200.flex.flex-col.h-full', [
             // Logo header for mobile only
             onClose && m('.flex.items-center.justify-between.p-4.border-b.border-base-300', [
-                m('.flex.items-center.gap-3', [
+                m('.flex.items-center.space-x-3', [
                     m('img.w-8.h-8', { src: '/logo.svg', alt: 'SeedReap' }),
                     m('span.text-lg.font-semibold', 'SeedReap')
                 ]),
@@ -157,9 +157,9 @@ const SidebarContent = {
             ]),
 
             // Main navigation
-            m('ul.menu.flex-1.p-2.gap-1', [
+            m('ul.menu.flex-1.p-2.space-y-1', [
                 m('li', [
-                    m('a.flex.items-center.gap-3', {
+                    m('a.flex.items-center.space-x-3', {
                         href: '#!/',
                         class: currentRoute === '/' ? 'active' : '',
                         title: 'Dashboard',
@@ -170,7 +170,7 @@ const SidebarContent = {
                     ])
                 ]),
                 m('li', [
-                    m('a.flex.items-center.gap-3', {
+                    m('a.flex.items-center.space-x-3', {
                         href: '#!/config',
                         class: currentRoute === '/config' ? 'active' : '',
                         title: 'Configuration',
@@ -181,7 +181,7 @@ const SidebarContent = {
                     ])
                 ]),
                 m('li', [
-                    m('a.flex.items-center.gap-3', {
+                    m('a.flex.items-center.space-x-3', {
                         href: '#!/timeline',
                         class: currentRoute === '/timeline' ? 'active' : '',
                         title: 'Timeline',
@@ -196,9 +196,9 @@ const SidebarContent = {
             // Bottom section - Settings + Collapse toggle
             m('.border-t.border-base-300', [
                 // Settings link
-                m('ul.menu.p-2.gap-1', [
+                m('ul.menu.p-2.space-y-1', [
                     m('li', [
-                        m('a.flex.items-center.gap-3', {
+                        m('a.flex.items-center.space-x-3', {
                             href: '#!/settings',
                             class: currentRoute === '/settings' ? 'active' : '',
                             title: 'Settings',

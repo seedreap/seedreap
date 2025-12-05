@@ -139,7 +139,8 @@ func TestGetDownloadHandler(t *testing.T) {
 	t.Run("NotFound", func(t *testing.T) {
 		ts := newTestServer(t)
 
-		req := httptest.NewRequest(http.MethodGet, "/api/downloads/nonexistent", nil)
+		// Use REST-style route: /api/downloaders/:downloader/downloads/:id
+		req := httptest.NewRequest(http.MethodGet, "/api/downloaders/seedbox/downloads/nonexistent", nil)
 		rec := httptest.NewRecorder()
 		ts.server.ServeHTTP(rec, req)
 
@@ -150,44 +151,6 @@ func TestGetDownloadHandler(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, "download not found", response["error"])
-	})
-}
-
-// --- Jobs Endpoint Tests ---
-
-func TestListJobsHandler(t *testing.T) {
-	t.Run("EmptyJobs", func(t *testing.T) {
-		ts := newTestServer(t)
-
-		req := httptest.NewRequest(http.MethodGet, "/api/jobs", nil)
-		rec := httptest.NewRecorder()
-		ts.server.ServeHTTP(rec, req)
-
-		assert.Equal(t, http.StatusOK, rec.Code)
-
-		var response []any
-		err := json.Unmarshal(rec.Body.Bytes(), &response)
-		require.NoError(t, err)
-
-		assert.Empty(t, response)
-	})
-}
-
-func TestGetJobHandler(t *testing.T) {
-	t.Run("NotFound", func(t *testing.T) {
-		ts := newTestServer(t)
-
-		req := httptest.NewRequest(http.MethodGet, "/api/jobs/nonexistent", nil)
-		rec := httptest.NewRecorder()
-		ts.server.ServeHTTP(rec, req)
-
-		assert.Equal(t, http.StatusNotFound, rec.Code)
-
-		var response map[string]string
-		err := json.Unmarshal(rec.Body.Bytes(), &response)
-		require.NoError(t, err)
-
-		assert.Equal(t, "job not found", response["error"])
 	})
 }
 
@@ -488,7 +451,7 @@ func TestAPIIntegration(t *testing.T) {
 		assert.Equal(t, "dl-tv", response[0]["id"])
 	})
 
-	t.Run("JobsListRecordsSpeed", func(t *testing.T) {
+	t.Run("DownloadsListRecordsSpeed", func(t *testing.T) {
 		ts := newTestServer(t)
 
 		// Initial speed history should be empty
@@ -501,8 +464,8 @@ func TestAPIIntegration(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, history)
 
-		// Call jobs endpoint - this records speed
-		req = httptest.NewRequest(http.MethodGet, "/api/jobs", nil)
+		// Call downloads endpoint - this records speed
+		req = httptest.NewRequest(http.MethodGet, "/api/downloads", nil)
 		rec = httptest.NewRecorder()
 		ts.server.ServeHTTP(rec, req)
 		assert.Equal(t, http.StatusOK, rec.Code)
