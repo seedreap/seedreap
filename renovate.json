@@ -20,8 +20,8 @@
       "matchDatasources": [
         "go"
       ],
-      "matchPackagePrefixes": [
-        "go.opentelemetry.io/"
+      "matchPackageNames": [
+        "go.opentelemetry.io/{/,}**"
       ]
     },
     {
