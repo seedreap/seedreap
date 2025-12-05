@@ -1,0 +1,99 @@
+# SeedReap example configuration
+
+# HTTP server settings
+server:
+  listen: "[::]:8423"
+
+# Sync settings
+sync:
+  # Base path for downloads (where media apps expect files)
+  downloadsPath: /downloads
+
+  # Staging path for syncing (files sync here first, then move to final location)
+  syncingPath: /downloads/.seedreap-syncing
+
+  # Maximum concurrent file transfers (number of files transferring at once)
+  maxConcurrent: 2
+
+  # Parallel connections per file (segments the file for faster transfers)
+  # Higher values = faster transfers but more server load
+  # Default: 8
+  parallelConnections: 8
+
+  # How often to poll download clients
+  pollInterval: 30s
+
+  # Optional: limit transfer speed per file (bytes per second, 0 = unlimited)
+  # Note: Total max bandwidth = transferSpeedMax * maxConcurrent
+  # Example: 10MB/s per file with 2 concurrent = 20MB/s total max
+  # transferSpeedMax: 0
+
+# Download clients
+downloaders:
+  # Name can be anything - used for logging and path organization
+  seedbox:
+    # Type of download client
+    type: qbittorrent
+
+    # qBittorrent Web UI URL
+    url: http://seedbox.example.com:8080
+
+    # Optional: credentials (omit if qBittorrent auth is disabled)
+    username: admin
+    password: your-password
+
+    # SSH connection for file transfer
+    ssh:
+      host: seedbox.example.com
+      port: 22
+      user: seedbox
+      keyFile: /config/ssh/id_ed25519
+
+# Applications to notify when downloads complete
+apps:
+  # TV Shows via Sonarr
+  sonarr:
+    type: sonarr
+    url: http://sonarr:8989
+    apiKey: your-sonarr-api-key
+
+    # qBittorrent category to watch
+    category: tv-sonarr
+
+    # Optional: override where files are placed
+    # Defaults to: {downloadsPath}/{downloader_name}/{category}
+    # downloadsPath: /downloads/tv
+
+    # Optional: delete synced files when category changes to an untracked category
+    # Useful with Sonarr's "Post-Import Category" feature
+    # Default: false
+    cleanupOnCategoryChange: true
+
+    # Optional: delete synced files when torrent is removed from downloader
+    # Default: false
+    cleanupOnRemove: false
+
+  # Movies via Radarr
+  radarr:
+    type: radarr
+    url: http://radarr:7878
+    apiKey: your-radarr-api-key
+    category: movies-radarr
+    cleanupOnCategoryChange: true
+
+  # 4K Movies via separate Radarr instance
+  radarr-4k:
+    type: radarr
+    url: http://radarr-4k:7878
+    apiKey: your-radarr-4k-api-key
+    category: movies-4k
+    cleanupOnCategoryChange: true
+
+  # Passthrough: sync files without triggering any app import
+  # Useful for categories not associated with any *arr app
+  misc:
+    type: passthrough
+    category: misc
+    # downloadsPath: /downloads/misc
+    # cleanupOnCategoryChange: false
+    # cleanupOnRemove: false

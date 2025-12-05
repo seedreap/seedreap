@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 2000">
+  <defs>
+    <linearGradient id="cloudGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4A9BD9"/>
+      <stop offset="100%" style="stop-color:#1E5F8A"/>
+    </linearGradient>
+    <linearGradient id="stemGrad" x1="0" y1="1152" x2="0" y2="1699" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" style="stop-color:#4CAF50"/>
+      <stop offset="30%" style="stop-color:#4CAF50"/>
+      <stop offset="58%" style="stop-color:#4A9BD9"/>
+      <stop offset="100%" style="stop-color:#1E5F8A"/>
+    </linearGradient>
+    <linearGradient id="leafGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#8BC34A"/>
+      <stop offset="100%" style="stop-color:#4CAF50"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Cloud outline -->
+  <path d="M1531 813c0-23-2-47-5-70C1492 508 1289 344 1047 344c-195 0-367 109-453 273C555 602 516 594 477 594 289 594 141 750 141 945S289 1297 477 1297h969c227 0 414-180 414-406 0-31-3-63-8-86"
+        fill="none"
+        stroke="url(#cloudGrad)"
+        stroke-width="78"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+
+  <!-- Arrow head with rounded ends -->
+  <path d="M621 1480 L839 1699 L1058 1480"
+        fill="none"
+        stroke="url(#stemGrad)"
+        stroke-width="62"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+
+  <!-- Stem with taper from 30 at top to 62 at bottom -->
+  <path d="M824 1152 L854 1152 L870 1699 L808 1699 Z"
+        fill="url(#stemGrad)"/>
+
+  <!-- Seedling plant with stroke to match line width -->
+  <g transform="translate(460, 603) scale(0.1875)">
+    <path fill="url(#leafGrad)"
+          stroke="url(#leafGrad)"
+          stroke-width="150"
+          stroke-linejoin="round"
+          d="M 4550.270996 0 C 1981.467041 423.80957 2016.061768 2300.681641 2016.061768 2300.681641 C 1678.740967 622.740723 0.807129 726.53125 0.807129 726.53125 C 26.75415 2646.647705 1769.557129 2685.568359 1769.557129 2685.568359 C 1769.557129 2685.568359 1566.304932 1868.222656 1099.248779 1574.150391 C 1099.248779 1574.150391 1439.812744 1869.303467 1588.446533 2505.111084 C 85.049927 2102.308105 173.783691 925.462402 173.783691 925.462402 C 1877.673828 964.382813 2024.713623 2966.666748 2024.713623 2966.666748 C 2024.713623 2966.666748 2085.255371 588.143555 4316.743652 345.968262 C 4209.416016 2056.487549 3047.781738 2452.518311 2528.625 2614.406738 C 2820.149414 1402.466797 3659.139648 930.743652 3659.139648 930.743652 C 2459.618652 1463.116699 2275.536621 2845.578613 2275.536621 2845.578613 C 2283.078613 2844.663574 2290.575684 2843.628906 2298.013672 2842.499268 C 4756.470215 2510.108887 4550.270996 0 4550.270996 0 Z"/>
+  </g>
+</svg>

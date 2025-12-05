@@ -1,0 +1,96 @@
+site_name: SeedReap
+site_description: Reap what your seedbox has sown - High-speed parallel transfers from seedboxes
+site_url: https://seedreap.github.io/seedreap
+repo_url: https://github.com/seedreap/seedreap
+repo_name: seedreap/seedreap
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  logo: images/logo.png
+  favicon: images/logo.ico
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: green
+      accent: light green
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: green
+      accent: light green
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+  - minify:
+      minify_html: true
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+  - pymdownx.critic
+  - pymdownx.caret
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.tilde
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/seedreap/seedreap
+
+copyright: Copyright &copy; 2025 SeedReap Contributors
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quickstart.md
+  - Configuration:
+      - Overview: configuration/index.md
+      - Downloaders: configuration/downloaders.md
+      - Apps: configuration/apps.md
+      - Sync Settings: configuration/sync.md
+      - Environment Variables: configuration/environment-variables.md
+  - Deployment:
+      - Docker: deployment/docker.md
+      - Kubernetes: deployment/kubernetes.md
+  - API Reference: api.md
+  - Development:
+      - Contributing: development/contributing.md
+      - Extending: development/extending.md

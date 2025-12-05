@@ -1,0 +1,31 @@
+# Binaries
+seedreap
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace file
+go.work
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Config files with secrets
+config.yaml
+.seedreap.yaml
+
+# OS
+.DS_Store
+Thumbs.db
