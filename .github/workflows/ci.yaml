@@ -6,10 +6,12 @@ on:
     branches:
       - main
   pull_request:
+  merge_group:
   workflow_dispatch:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   markdown-lint:
@@ -59,15 +61,12 @@ jobs:
           cache: true
 
       - name: Run tests
-        run: go test -v -race -coverprofile=coverage.out ./...
+        run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
-      - name: Upload coverage
-        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5
-        with:
-          files: coverage.out
-          fail_ci_if_error: false
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v6
         env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   test-integration:
     name: Integration Test
