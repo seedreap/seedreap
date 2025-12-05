@@ -3,12 +3,13 @@
 import m from 'mithril';
 
 // Toggle a value in a filter set
-export function toggleFilter(filterSet, value) {
+export function toggleFilter(filterSet, value, onFilterChange) {
     if (filterSet.has(value)) {
         filterSet.delete(value);
     } else {
         filterSet.add(value);
     }
+    if (onFilterChange) onFilterChange();
 }
 
 // Generic filter dropdown component
@@ -18,9 +19,10 @@ export function toggleFilter(filterSet, value) {
 //   filterSet: Set - the set tracking selected values
 //   getLabel: (value) => string - optional function to get display label
 //   getBadgeClass: (value) => string - optional function to get badge class for styling
+//   onFilterChange: () => void - optional callback when filter changes (for persistence)
 const FilterDropdown = {
     view: (vnode) => {
-        const { label, values, filterSet, getLabel, getBadgeClass } = vnode.attrs;
+        const { label, values, filterSet, getLabel, getBadgeClass, onFilterChange } = vnode.attrs;
         const hasFilters = filterSet.size > 0;
 
         if (values.length === 0) {
@@ -52,6 +54,7 @@ const FilterDropdown = {
                         onclick: (e) => {
                             e.stopPropagation();
                             filterSet.clear();
+                            if (onFilterChange) onFilterChange();
                         }
                     }, 'Clear filter')
                 ]),
@@ -65,7 +68,7 @@ const FilterDropdown = {
                             m('input.checkbox.checkbox-xs', {
                                 type: 'checkbox',
                                 checked: filterSet.has(value),
-                                onchange: () => toggleFilter(filterSet, value)
+                                onchange: () => toggleFilter(filterSet, value, onFilterChange)
                             }),
                             badgeClass
                                 ? m('span.badge.badge-sm.whitespace-nowrap', { class: badgeClass }, displayLabel)

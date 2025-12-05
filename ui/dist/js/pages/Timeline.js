@@ -133,24 +133,24 @@ const Timeline = {
             );
         }
 
-        // Filter by selected apps
+        // Filter by selected apps - only show events that have a matching app_name
         if (filterState.selectedApps.size > 0) {
             filteredEvents = filteredEvents.filter(event =>
-                !event.app_name || filterState.selectedApps.has(event.app_name)
+                event.app_name && filterState.selectedApps.has(event.app_name)
             );
         }
 
-        // Filter by selected categories
+        // Filter by selected categories - only show events that have a matching category
         if (filterState.selectedCategories.size > 0) {
             filteredEvents = filteredEvents.filter(event =>
-                !event.details?.category || filterState.selectedCategories.has(event.details.category)
+                event.details?.category && filterState.selectedCategories.has(event.details.category)
             );
         }
 
-        // Filter by selected downloaders
+        // Filter by selected downloaders - only show events that have a matching downloader
         if (filterState.selectedDownloaders.size > 0) {
             filteredEvents = filteredEvents.filter(event =>
-                !event.downloader || filterState.selectedDownloaders.has(event.downloader)
+                event.downloader && filterState.selectedDownloaders.has(event.downloader)
             );
         }
 

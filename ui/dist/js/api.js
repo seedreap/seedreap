@@ -125,6 +125,15 @@ export async function refresh() {
     await fetchStats();
     await refreshSyncingJobFiles();
     await fetchJobs();
+
+    // Update sparkline with current total speed
+    let totalSpeed = 0;
+    for (const job of jobs.list) {
+        if (job.status === 'syncing') {
+            totalSpeed += job.bytes_per_sec || 0;
+        }
+    }
+    addPoint(totalSpeed);
 }
 
 // Initial fetch (includes apps/downloaders which don't change often)
@@ -180,9 +189,6 @@ export function calculateTransferStatus() {
             completedFiles += job.total_files || 0;
         }
     }
-
-    // Update sparkline
-    addPoint(totalSpeed);
 
     const remainingBytes = syncTotalSize - syncTransferred;
     const etaSeconds = totalSpeed > 0 ? remainingBytes / totalSpeed : 0;

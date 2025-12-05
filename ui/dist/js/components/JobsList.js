@@ -4,6 +4,7 @@ import m from 'mithril';
 import {
     jobs,
     filters,
+    saveFilters,
     setJobSort,
     getSortedJobs,
     getFilteredJobs,
@@ -34,22 +35,26 @@ const FilterBar = {
                 values: jobStatusValues,
                 filterSet: filters.status,
                 getLabel: getJobStatusLabel,
-                getBadgeClass: getJobStatusBadgeClass
+                getBadgeClass: getJobStatusBadgeClass,
+                onFilterChange: saveFilters
             }),
             m(FilterDropdown, {
                 label: 'App',
                 values: allApps,
-                filterSet: filters.apps
+                filterSet: filters.apps,
+                onFilterChange: saveFilters
             }),
             m(FilterDropdown, {
                 label: 'Category',
                 values: allCategories,
-                filterSet: filters.categories
+                filterSet: filters.categories,
+                onFilterChange: saveFilters
             }),
             m(FilterDropdown, {
                 label: 'Downloader',
                 values: allDownloaders,
-                filterSet: filters.downloaders
+                filterSet: filters.downloaders,
+                onFilterChange: saveFilters
             }),
             m('.flex-1'),
             m('input.input.input-xs.input-bordered.w-40', {
