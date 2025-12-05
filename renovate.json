@@ -4,7 +4,8 @@
     "config:recommended",
     ":automergeStableNonMajor",
     ":semanticCommits",
-    "helpers:pinGitHubActionDigests"
+    "helpers:pinGitHubActionDigests",
+    "github>seedreap/seedreap//.renovate/merge-queue.json"
   ],
   "labels": [
     "dependencies"
