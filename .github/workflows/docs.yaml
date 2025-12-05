@@ -14,6 +14,11 @@ on:
       - "docs/**"
       - "mkdocs.yml"
       - ".github/workflows/docs.yaml"
+  merge_group:
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - ".github/workflows/docs.yaml"
   workflow_dispatch:
 
 permissions:
