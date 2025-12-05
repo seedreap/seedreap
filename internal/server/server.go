@@ -15,6 +15,7 @@ import (
 	"github.com/seedreap/seedreap/internal/download"
 	"github.com/seedreap/seedreap/internal/filesync"
 	"github.com/seedreap/seedreap/internal/orchestrator"
+	"github.com/seedreap/seedreap/internal/timeline"
 	"github.com/seedreap/seedreap/internal/transfer"
 )
 
@@ -194,6 +195,11 @@ func New(cfg config.Config, opts Options) (*Server, error) {
 
 	syncr := filesync.New(cfg.Sync.SyncingPath, syncerOpts...)
 
+	// Create timeline recorder
+	timelineRecorder := timeline.NewRecorder(
+		timeline.WithLogger(logger.With().Str("component", "timeline").Logger()),
+	)
+
 	// Create orchestrator
 	pollInterval := cfg.Sync.PollInterval
 	if pollInterval == 0 {
@@ -207,6 +213,7 @@ func New(cfg config.Config, opts Options) (*Server, error) {
 		cfg.Sync.DownloadsPath,
 		orchestrator.WithLogger(logger.With().Str("component", "orchestrator").Logger()),
 		orchestrator.WithPollInterval(pollInterval),
+		orchestrator.WithTimeline(timelineRecorder),
 	)
 
 	// Create API server

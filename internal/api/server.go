@@ -144,6 +144,12 @@ func (s *Server) setupRoutes() {
 	// Apps
 	api.GET("/apps", s.listAppsHandler)
 
+	// Timeline
+	api.GET("/timeline", s.timelineHandler)
+	api.GET("/apps/:id/timeline", s.appTimelineHandler)
+	api.GET("/downloaders/:id/timeline", s.downloaderTimelineHandler)
+	api.GET("/jobs/:id/timeline", s.jobTimelineHandler)
+
 	// Serve UI if available
 	if s.uiFS != nil {
 		s.echo.GET("/*", echo.WrapHandler(http.FileServer(http.FS(s.uiFS))))
@@ -299,6 +305,7 @@ func (s *Server) listJobsHandler(c echo.Context) error {
 		Name            string  `json:"name"`
 		Downloader      string  `json:"downloader"`
 		Category        string  `json:"category"`
+		App             string  `json:"app"`
 		Status          string  `json:"status"`
 		SeedboxState    string  `json:"seedbox_state"`
 		SeedboxProgress float64 `json:"seedbox_progress"`
@@ -315,9 +322,13 @@ func (s *Server) listJobsHandler(c echo.Context) error {
 		dl := td.GetDownload()
 
 		// Only include downloads for categories that have matching apps
-		if len(s.apps.GetByCategory(dl.Category)) == 0 {
+		apps := s.apps.GetByCategory(dl.Category)
+		if len(apps) == 0 {
 			continue
 		}
+
+		// Get app name (use first matching app)
+		appName := apps[0].Name()
 
 		job := td.GetSyncJob()
 		state := td.GetState()
@@ -331,6 +342,7 @@ func (s *Server) listJobsHandler(c echo.Context) error {
 				Name:            snapshot.Name,
 				Downloader:      snapshot.Downloader,
 				Category:        snapshot.Category,
+				App:             appName,
 				Status:          string(snapshot.Status),
 				SeedboxState:    string(dl.State),
 				SeedboxProgress: dl.Progress,
@@ -347,6 +359,7 @@ func (s *Server) listJobsHandler(c echo.Context) error {
 				Name:            dl.Name,
 				Downloader:      td.DownloaderName,
 				Category:        dl.Category,
+				App:             appName,
 				Status:          string(state), // Use orchestrator state
 				SeedboxState:    string(dl.State),
 				SeedboxProgress: dl.Progress,
@@ -527,4 +540,46 @@ func (s *Server) indexHandler(c echo.Context) error {
 func (s *Server) speedHistoryHandler(c echo.Context) error {
 	history := s.syncer.GetSpeedHistory()
 	return c.JSON(http.StatusOK, history)
+}
+
+func (s *Server) timelineHandler(c echo.Context) error {
+	tl := s.orchestrator.GetTimeline()
+	if tl == nil {
+		return c.JSON(http.StatusOK, []any{})
+	}
+
+	return c.JSON(http.StatusOK, tl.GetAll())
+}
+
+func (s *Server) appTimelineHandler(c echo.Context) error {
+	id := c.Param("id")
+
+	tl := s.orchestrator.GetTimeline()
+	if tl == nil {
+		return c.JSON(http.StatusOK, []any{})
+	}
+
+	return c.JSON(http.StatusOK, tl.GetByApp(id))
+}
+
+func (s *Server) downloaderTimelineHandler(c echo.Context) error {
+	id := c.Param("id")
+
+	tl := s.orchestrator.GetTimeline()
+	if tl == nil {
+		return c.JSON(http.StatusOK, []any{})
+	}
+
+	return c.JSON(http.StatusOK, tl.GetByDownloader(id))
+}
+
+func (s *Server) jobTimelineHandler(c echo.Context) error {
+	id := c.Param("id")
+
+	tl := s.orchestrator.GetTimeline()
+	if tl == nil {
+		return c.JSON(http.StatusOK, []any{})
+	}
+
+	return c.JSON(http.StatusOK, tl.GetByDownload(id))
 }
