@@ -16,6 +16,7 @@ import (
 	"github.com/seedreap/seedreap/internal/app"
 	"github.com/seedreap/seedreap/internal/download"
 	"github.com/seedreap/seedreap/internal/filesync"
+	"github.com/seedreap/seedreap/internal/timeline"
 )
 
 // DownloadState tracks the state of a download through the sync pipeline.
@@ -100,6 +101,7 @@ type Orchestrator struct {
 	downloaders   *download.Registry
 	apps          *app.Registry
 	syncer        *filesync.Syncer
+	timeline      timeline.Recorder
 	pollInterval  time.Duration
 	downloadsPath string
 	logger        zerolog.Logger
@@ -126,6 +128,13 @@ func WithLogger(logger zerolog.Logger) Option {
 func WithPollInterval(d time.Duration) Option {
 	return func(o *Orchestrator) {
 		o.pollInterval = d
+	}
+}
+
+// WithTimeline sets the timeline recorder.
+func WithTimeline(t timeline.Recorder) Option {
+	return func(o *Orchestrator) {
+		o.timeline = t
 	}
 }
 
@@ -158,17 +167,39 @@ func New(
 func (o *Orchestrator) Start(ctx context.Context) error {
 	o.ctx, o.cancel = context.WithCancel(ctx)
 
+	// Record system start
+	o.recordEvent(timeline.EventSystemStarted, "System started", "", "", "", "", map[string]any{
+		"downloaders": len(o.downloaders.All()),
+		"apps":        len(o.apps.All()),
+	})
+
 	// Connect to all downloaders
 	for name, dl := range o.downloaders.All() {
 		if err := dl.Connect(o.ctx); err != nil {
 			return fmt.Errorf("failed to connect to downloader %s: %w", name, err)
 		}
+		o.recordEvent(
+			timeline.EventDownloaderConnect,
+			fmt.Sprintf("Connected to downloader: %s", name),
+			"",
+			"",
+			"",
+			name,
+			map[string]any{
+				"type": dl.Type(),
+			},
+		)
 	}
 
 	// Test connections to all apps
 	for name, a := range o.apps.All() {
 		if err := a.TestConnection(o.ctx); err != nil {
 			o.logger.Warn().Err(err).Str("app", name).Msg("failed to connect to app")
+		} else {
+			o.recordEvent(timeline.EventAppConnected, fmt.Sprintf("Connected to app: %s", name), "", "", name, "", map[string]any{
+				"type":     a.Type(),
+				"category": a.Category(),
+			})
 		}
 	}
 
@@ -326,6 +357,21 @@ func (o *Orchestrator) processDownload(downloaderName string, dl download.Downlo
 			Int("apps", len(tracked.Apps)).
 			Int("files", len(dlInfo.Files)).
 			Msg("discovered new download")
+
+		// Record discovery event
+		o.recordEvent(
+			timeline.EventDiscovered,
+			fmt.Sprintf("Discovered: %s", dlInfo.Name),
+			dlInfo.ID,
+			dlInfo.Name,
+			"",
+			downloaderName,
+			map[string]any{
+				"category":   dlInfo.Category,
+				"file_count": len(dlInfo.Files),
+				"size":       dlInfo.Size,
+			},
+		)
 	}
 	o.trackedMu.Unlock()
 
@@ -492,6 +538,20 @@ func (o *Orchestrator) startSyncing(tracked *TrackedDownload, dl download.Downlo
 		Int("files", len(files)).
 		Msg("starting sync")
 
+	// Record sync started event
+	o.recordEvent(
+		timeline.EventSyncStarted,
+		fmt.Sprintf("Sync started: %s", tracked.Download.Name),
+		tracked.Download.ID,
+		tracked.Download.Name,
+		"",
+		tracked.DownloaderName,
+		map[string]any{
+			"file_count": len(files),
+			"final_path": finalPath,
+		},
+	)
+
 	// Start sync in background - track in WaitGroup so Stop() waits for completion
 	o.wg.Go(func() {
 		if syncErr := o.syncer.SyncJob(o.ctx, dl, tracked.SyncJob); syncErr != nil {
@@ -564,6 +624,19 @@ func (o *Orchestrator) continueSyncing(tracked *TrackedDownload, dl download.Dow
 			Str("download", tracked.Download.Name).
 			Msg("sync complete")
 
+		// Record sync complete event
+		o.recordEvent(
+			timeline.EventSyncComplete,
+			fmt.Sprintf("Sync complete: %s", tracked.Download.Name),
+			tracked.Download.ID,
+			tracked.Download.Name,
+			"",
+			tracked.DownloaderName,
+			map[string]any{
+				"completed_size": completedSize,
+			},
+		)
+
 	case filesync.FileStatusError:
 		tracked.State = StateError
 		tracked.Error = tracked.SyncJob.Error
@@ -571,6 +644,23 @@ func (o *Orchestrator) continueSyncing(tracked *TrackedDownload, dl download.Dow
 			Err(tracked.Error).
 			Str("download", tracked.Download.Name).
 			Msg("sync error")
+
+		// Record error event
+		errMsg := ""
+		if tracked.Error != nil {
+			errMsg = tracked.Error.Error()
+		}
+		o.recordEvent(
+			timeline.EventError,
+			fmt.Sprintf("Sync error: %s", tracked.Download.Name),
+			tracked.Download.ID,
+			tracked.Download.Name,
+			"",
+			tracked.DownloaderName,
+			map[string]any{
+				"error": errMsg,
+			},
+		)
 
 	case filesync.FileStatusSyncing:
 		// Sync is in progress, wait for it to complete
@@ -630,12 +720,28 @@ func (o *Orchestrator) moveToFinal(tracked *TrackedDownload) {
 		Str("download", tracked.Download.Name).
 		Str("path", job.FinalPath).
 		Msg("moved to final location")
+
+	// Record move complete event
+	o.recordEvent(
+		timeline.EventMoveComplete,
+		fmt.Sprintf("Moved to final location: %s", tracked.Download.Name),
+		tracked.Download.ID,
+		tracked.Download.Name,
+		"",
+		tracked.DownloaderName,
+		map[string]any{
+			"path": job.FinalPath,
+		},
+	)
 }
 
 func (o *Orchestrator) triggerImport(tracked *TrackedDownload) {
 	tracked.mu.Lock()
 	apps := tracked.Apps
 	job := tracked.SyncJob
+	downloadID := tracked.Download.ID
+	downloadName := tracked.Download.Name
+	downloaderName := tracked.DownloaderName
 	tracked.mu.Unlock()
 
 	if job == nil {
@@ -644,24 +750,40 @@ func (o *Orchestrator) triggerImport(tracked *TrackedDownload) {
 
 	if len(apps) == 0 {
 		o.logger.Info().
-			Str("download", tracked.Download.Name).
+			Str("download", downloadName).
 			Str("path", job.FinalPath).
 			Msg("sync complete, no apps to trigger import")
 	} else {
-		importPath := filepath.Join(job.FinalPath, filepath.Base(tracked.Download.Name))
+		importPath := filepath.Join(job.FinalPath, filepath.Base(downloadName))
 
-		for _, app := range apps {
-			if err := app.TriggerImport(o.ctx, importPath); err != nil {
+		for _, a := range apps {
+			// Record import started event
+			o.recordEvent(timeline.EventImportStarted, fmt.Sprintf("Import started: %s -> %s", downloadName, a.Name()), downloadID, downloadName, a.Name(), downloaderName, map[string]any{
+				"path": importPath,
+			})
+
+			if err := a.TriggerImport(o.ctx, importPath); err != nil {
 				o.logger.Error().
 					Err(err).
-					Str("download", tracked.Download.Name).
-					Str("app", app.Name()).
+					Str("download", downloadName).
+					Str("app", a.Name()).
 					Msg("import trigger error")
+
+				// Record import failed event
+				o.recordEvent(timeline.EventImportFailed, fmt.Sprintf("Import failed: %s -> %s", downloadName, a.Name()), downloadID, downloadName, a.Name(), downloaderName, map[string]any{
+					"path":  importPath,
+					"error": err.Error(),
+				})
 			} else {
 				o.logger.Info().
-					Str("download", tracked.Download.Name).
-					Str("app", app.Name()).
+					Str("download", downloadName).
+					Str("app", a.Name()).
 					Msg("triggered import")
+
+				// Record import complete event
+				o.recordEvent(timeline.EventImportComplete, fmt.Sprintf("Import complete: %s -> %s", downloadName, a.Name()), downloadID, downloadName, a.Name(), downloaderName, map[string]any{
+					"path": importPath,
+				})
 			}
 		}
 	}
@@ -670,6 +792,17 @@ func (o *Orchestrator) triggerImport(tracked *TrackedDownload) {
 	tracked.State = StateComplete
 	tracked.CompletedAt = time.Now()
 	tracked.mu.Unlock()
+
+	// Record complete event
+	o.recordEvent(
+		timeline.EventComplete,
+		fmt.Sprintf("Complete: %s", downloadName),
+		downloadID,
+		downloadName,
+		"",
+		downloaderName,
+		nil,
+	)
 }
 
 func (o *Orchestrator) cleanup(tracked *TrackedDownload) {
@@ -777,12 +910,26 @@ func (o *Orchestrator) handleDownloadRemoved(tracked *TrackedDownload, key strin
 	apps := tracked.Apps
 	job := tracked.SyncJob
 	state := tracked.State
+	downloaderName := tracked.DownloaderName
 	tracked.mu.RUnlock()
 
 	o.logger.Info().
 		Str("download", downloadName).
 		Str("state", string(state)).
 		Msg("download removed from downloader")
+
+	// Record removed event
+	o.recordEvent(
+		timeline.EventRemoved,
+		fmt.Sprintf("Removed: %s", downloadName),
+		downloadID,
+		downloadName,
+		"",
+		downloaderName,
+		map[string]any{
+			"state": string(state),
+		},
+	)
 
 	// If still syncing, cancel the sync job first
 	if state != StateComplete && job != nil {
@@ -822,6 +969,7 @@ func (o *Orchestrator) handleCategoryChanged(tracked *TrackedDownload, key strin
 	apps := tracked.Apps
 	job := tracked.SyncJob
 	state := tracked.State
+	downloaderName := tracked.DownloaderName
 	tracked.mu.RUnlock()
 
 	o.logger.Info().
@@ -830,6 +978,21 @@ func (o *Orchestrator) handleCategoryChanged(tracked *TrackedDownload, key strin
 		Str("new_category", newCategory).
 		Str("state", string(state)).
 		Msg("download category changed")
+
+	// Record category changed event
+	o.recordEvent(
+		timeline.EventCategoryChanged,
+		fmt.Sprintf("Category changed: %s (%s -> %s)", downloadName, originalCategory, newCategory),
+		downloadID,
+		downloadName,
+		"",
+		downloaderName,
+		map[string]any{
+			"old_category": originalCategory,
+			"new_category": newCategory,
+			"state":        string(state),
+		},
+	)
 
 	// Check if new category belongs to another app
 	newApps := o.apps.GetByCategory(newCategory)
@@ -1022,6 +1185,8 @@ func (o *Orchestrator) cleanupSyncedFiles(tracked *TrackedDownload, reason strin
 	tracked.mu.RLock()
 	job := tracked.SyncJob
 	downloadName := tracked.Download.Name
+	downloadID := tracked.Download.ID
+	downloaderName := tracked.DownloaderName
 	tracked.mu.RUnlock()
 
 	if job == nil {
@@ -1049,6 +1214,12 @@ func (o *Orchestrator) cleanupSyncedFiles(tracked *TrackedDownload, reason strin
 			Str("download", downloadName).
 			Str("path", cleanupPath).
 			Msg("cleaned up synced files")
+
+		// Record cleanup event
+		o.recordEvent(timeline.EventCleanup, fmt.Sprintf("Cleaned up: %s", downloadName), downloadID, downloadName, "", downloaderName, map[string]any{
+			"path":   cleanupPath,
+			"reason": reason,
+		})
 	}
 }
 
@@ -1066,6 +1237,33 @@ func (o *Orchestrator) removeFromTracking(tracked *TrackedDownload, key string) 
 	if syncJob != nil {
 		o.syncer.RemoveJob(downloadID)
 	}
+}
+
+// recordEvent records an event to the timeline if configured.
+func (o *Orchestrator) recordEvent(
+	eventType timeline.EventType,
+	message string,
+	downloadID, downloadName, appName, downloaderName string,
+	details map[string]any,
+) {
+	if o.timeline == nil {
+		return
+	}
+
+	o.timeline.Record(timeline.Event{
+		Type:         eventType,
+		Message:      message,
+		DownloadID:   downloadID,
+		DownloadName: downloadName,
+		AppName:      appName,
+		Downloader:   downloaderName,
+		Details:      details,
+	})
+}
+
+// GetTimeline returns the timeline recorder.
+func (o *Orchestrator) GetTimeline() timeline.Recorder {
+	return o.timeline
 }
 
 // GetStats returns orchestrator statistics.

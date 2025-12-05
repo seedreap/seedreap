@@ -1,0 +1,84 @@
+// FilterDropdown - reusable filter dropdown component
+
+import m from 'mithril';
+
+// Toggle a value in a filter set
+export function toggleFilter(filterSet, value, onFilterChange) {
+    if (filterSet.has(value)) {
+        filterSet.delete(value);
+    } else {
+        filterSet.add(value);
+    }
+    if (onFilterChange) onFilterChange();
+}
+
+// Generic filter dropdown component
+// Props:
+//   label: string - dropdown button label
+//   values: array - list of values to filter by
+//   filterSet: Set - the set tracking selected values
+//   getLabel: (value) => string - optional function to get display label
+//   getBadgeClass: (value) => string - optional function to get badge class for styling
+//   onFilterChange: () => void - optional callback when filter changes (for persistence)
+const FilterDropdown = {
+    view: (vnode) => {
+        const { label, values, filterSet, getLabel, getBadgeClass, onFilterChange } = vnode.attrs;
+        const hasFilters = filterSet.size > 0;
+
+        if (values.length === 0) {
+            return m('span.text-xs.text-base-content/50', label);
+        }
+
+        return m('.dropdown', [
+            m('div.btn.btn-xs.btn-ghost.gap-1', {
+                tabindex: 0,
+                role: 'button'
+            }, [
+                label,
+                hasFilters && m('span.badge.badge-xs.badge-primary', filterSet.size),
+                m('svg.w-3.h-3', {
+                    xmlns: 'http://www.w3.org/2000/svg',
+                    viewBox: '0 0 24 24',
+                    fill: 'none',
+                    stroke: 'currentColor',
+                    'stroke-width': '2'
+                }, m('path', { d: 'M6 9l6 6 6-6' }))
+            ]),
+            m('ul.dropdown-content.menu.bg-base-100.rounded-box.z-50.p-2.shadow-xl.border.border-base-300.max-h-64.overflow-y-auto', {
+                tabindex: 0,
+                class: getBadgeClass ? 'w-56' : 'w-48'
+            }, [
+                // Clear button when filters are active
+                hasFilters && m('li.menu-title', [
+                    m('button.btn.btn-xs.btn-block', {
+                        onclick: (e) => {
+                            e.stopPropagation();
+                            filterSet.clear();
+                            if (onFilterChange) onFilterChange();
+                        }
+                    }, 'Clear filter')
+                ]),
+                // Value checkboxes - checked = in the set = will be shown
+                values.map(value => {
+                    const displayLabel = getLabel ? getLabel(value) : value;
+                    const badgeClass = getBadgeClass ? getBadgeClass(value) : null;
+
+                    return m('li', { key: value }, [
+                        m('label.flex.items-center.gap-2.cursor-pointer', [
+                            m('input.checkbox.checkbox-xs', {
+                                type: 'checkbox',
+                                checked: filterSet.has(value),
+                                onchange: () => toggleFilter(filterSet, value, onFilterChange)
+                            }),
+                            badgeClass
+                                ? m('span.badge.badge-sm.whitespace-nowrap', { class: badgeClass }, displayLabel)
+                                : m('span.text-sm.truncate', displayLabel)
+                        ])
+                    ]);
+                })
+            ])
+        ]);
+    }
+};
+
+export default FilterDropdown;
