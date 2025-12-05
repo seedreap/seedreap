@@ -16,7 +16,7 @@
   "packageRules": [
     {
       "groupName": "go opentelemetry packages and libraries",
-      "groupSlug": "opentelemetry-go and libraries",
+      "groupSlug": "opentelemetry-go-and-libraries",
       "matchDatasources": [
         "go"
       ],
