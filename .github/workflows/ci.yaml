@@ -102,3 +102,22 @@ jobs:
 
       - name: Build
         run: go build -v ./...
+
+  success:
+    name: CI Success
+    runs-on: ubuntu-24.04
+    needs: [markdown-lint, lint, test, test-integration, build]
+    if: always()
+
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [[ "${{ needs.markdown-lint.result }}" != "success" ]] ||
+             [[ "${{ needs.lint.result }}" != "success" ]] ||
+             [[ "${{ needs.test.result }}" != "success" ]] ||
+             [[ "${{ needs.test-integration.result }}" != "success" ]] ||
+             [[ "${{ needs.build.result }}" != "success" ]]; then
+            echo "One or more jobs failed"
+            exit 1
+          fi
+          echo "All jobs passed"
