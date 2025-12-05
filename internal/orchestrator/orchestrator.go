@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -16,6 +15,7 @@ import (
 	"github.com/seedreap/seedreap/internal/app"
 	"github.com/seedreap/seedreap/internal/download"
 	"github.com/seedreap/seedreap/internal/filesync"
+	"github.com/seedreap/seedreap/internal/fileutil"
 	"github.com/seedreap/seedreap/internal/timeline"
 )
 
@@ -1339,36 +1339,6 @@ func copyDir(src, dst string) error {
 			return os.MkdirAll(dstPath, info.Mode())
 		}
 
-		return copyFile(path, dstPath)
+		return fileutil.CopyFile(path, dstPath)
 	})
-}
-
-// copyFile copies a single file.
-func copyFile(src, dst string) (retErr error) {
-	srcFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if closeErr := srcFile.Close(); closeErr != nil && retErr == nil {
-			retErr = closeErr
-		}
-	}()
-
-	if err = os.MkdirAll(filepath.Dir(dst), 0750); err != nil {
-		return err
-	}
-
-	dstFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if closeErr := dstFile.Close(); closeErr != nil && retErr == nil {
-			retErr = closeErr
-		}
-	}()
-
-	_, err = io.Copy(dstFile, srcFile)
-	return err
 }

@@ -5,7 +5,6 @@ package testing
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -122,11 +121,6 @@ func (m *MockDownloader) GetFiles(ctx context.Context, id string) ([]download.Fi
 		return nil, ErrNotFound
 	}
 	return files, nil
-}
-
-// OpenFile opens a remote file for reading (not implemented for mock).
-func (m *MockDownloader) OpenFile(_ context.Context, _ string) (io.ReadCloser, error) {
-	return nil, errors.New("not implemented")
 }
 
 // SSHConfig returns the SSH configuration.

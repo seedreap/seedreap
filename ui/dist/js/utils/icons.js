@@ -47,13 +47,3 @@ export function getIconUrl(type, variant = 'default') {
     return `${SELFHST_CDN}/${iconName}.svg`;
 }
 
-// Check if we have an icon for this type
-export function hasIcon(type) {
-    const normalizedType = (type || '').toLowerCase();
-    return iconMap[normalizedType] != null;
-}
-
-// Default placeholder icon (generic server/app icon)
-export function getPlaceholderIcon() {
-    return `${SELFHST_CDN}/default.svg`;
-}

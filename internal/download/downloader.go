@@ -3,7 +3,6 @@ package download
 
 import (
 	"context"
-	"io"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -117,9 +116,6 @@ type Downloader interface {
 
 	// GetFiles returns the list of files for a download with current state.
 	GetFiles(ctx context.Context, id string) ([]File, error)
-
-	// OpenFile opens a remote file for reading via SFTP/SSH.
-	OpenFile(ctx context.Context, path string) (io.ReadCloser, error)
 
 	// SSHConfig returns the SSH configuration for this downloader.
 	SSHConfig() config.SSHConfig

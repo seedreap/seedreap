@@ -9,14 +9,10 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/pkg/sftp"
 	"github.com/rs/zerolog"
-	"golang.org/x/crypto/ssh"
 
 	"github.com/seedreap/seedreap/internal/config"
 )
@@ -30,8 +26,6 @@ type qbittorrentClient struct {
 	password   string
 	sshConfig  config.SSHConfig
 	httpClient *http.Client
-	sshClient  *ssh.Client
-	sftpClient *sftp.Client
 	logger     zerolog.Logger
 }
 
@@ -109,16 +103,10 @@ func (c *qbittorrentClient) SSHConfig() config.SSHConfig {
 	return c.sshConfig
 }
 
-// Connect establishes connections to qBittorrent API and SSH.
+// Connect establishes a connection to the qBittorrent API.
 func (c *qbittorrentClient) Connect(ctx context.Context) error {
-	// Login to qBittorrent API
 	if err := c.login(ctx); err != nil {
 		return fmt.Errorf("qbittorrent login failed: %w", err)
-	}
-
-	// Connect SSH/SFTP
-	if err := c.connectSSH(); err != nil {
-		return fmt.Errorf("ssh connection failed: %w", err)
 	}
 
 	c.logger.Info().
@@ -131,20 +119,7 @@ func (c *qbittorrentClient) Connect(ctx context.Context) error {
 
 // Close closes all connections.
 func (c *qbittorrentClient) Close() error {
-	var errs []error
-	if c.sftpClient != nil {
-		if err := c.sftpClient.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("closing sftp client: %w", err))
-		}
-	}
-	if c.sshClient != nil {
-		if err := c.sshClient.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("closing ssh client: %w", err))
-		}
-	}
-	if len(errs) > 0 {
-		return errors.Join(errs...)
-	}
+	// HTTP client doesn't need explicit closing
 	return nil
 }
 
@@ -201,55 +176,6 @@ func (c *qbittorrentClient) login(ctx context.Context) error {
 	if resp.StatusCode != http.StatusOK || string(body) != "Ok." {
 		return fmt.Errorf("login failed: %s", string(body))
 	}
-
-	return nil
-}
-
-func (c *qbittorrentClient) connectSSH() error {
-	if c.sshConfig.Host == "" {
-		return errors.New("ssh host not configured")
-	}
-
-	port := c.sshConfig.Port
-	if port == 0 {
-		port = 22
-	}
-
-	keyBytes, err := os.ReadFile(c.sshConfig.KeyFile)
-	if err != nil {
-		return fmt.Errorf("failed to read ssh key: %w", err)
-	}
-
-	signer, err := ssh.ParsePrivateKey(keyBytes)
-	if err != nil {
-		return fmt.Errorf("failed to parse ssh key: %w", err)
-	}
-
-	sshClientConfig := &ssh.ClientConfig{
-		User: c.sshConfig.User,
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(signer),
-		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec // TODO: implement known_hosts verification
-		Timeout:         c.sshConfig.Timeout,
-	}
-
-	addr := fmt.Sprintf("%s:%d", c.sshConfig.Host, port)
-	c.sshClient, err = ssh.Dial("tcp", addr, sshClientConfig)
-	if err != nil {
-		return fmt.Errorf("failed to dial ssh: %w", err)
-	}
-
-	c.sftpClient, err = sftp.NewClient(c.sshClient)
-	if err != nil {
-		return fmt.Errorf("failed to create sftp client: %w", err)
-	}
-
-	c.logger.Debug().
-		Str("host", c.sshConfig.Host).
-		Int("port", port).
-		Str("user", c.sshConfig.User).
-		Msg("ssh/sftp connected")
 
 	return nil
 }
@@ -365,23 +291,6 @@ func (c *qbittorrentClient) GetFiles(ctx context.Context, id string) ([]File, er
 	}
 
 	return result, nil
-}
-
-// OpenFile opens a remote file for reading.
-func (c *qbittorrentClient) OpenFile(_ context.Context, path string) (io.ReadCloser, error) {
-	if c.sftpClient == nil {
-		return nil, errors.New("sftp client not connected")
-	}
-
-	// Clean the path
-	path = filepath.Clean(path)
-
-	f, err := c.sftpClient.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open remote file %s: %w", path, err)
-	}
-
-	return f, nil
 }
 
 func (c *qbittorrentClient) toDownload(t qbittorrentAPITorrent) Download {
