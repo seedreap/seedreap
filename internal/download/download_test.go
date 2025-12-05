@@ -192,19 +192,12 @@ func TestQBittorrentLogin(t *testing.T) {
 			URL:      server.URL,
 			Username: "admin",
 			Password: "password",
-			SSH: config.SSHConfig{
-				Host: "", // No SSH - will fail at SSH step
-			},
 		}
 
 		dl := download.NewQBittorrent("seedbox", cfg)
 
-		// Connect will succeed at login but fail at SSH
 		err := dl.Connect(t.Context())
-
-		// Should fail on SSH, not on login
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "ssh")
+		require.NoError(t, err)
 	})
 
 	t.Run("LoginWithCredentials_Failure", func(t *testing.T) {
@@ -247,9 +240,7 @@ func TestQBittorrentLogin(t *testing.T) {
 		dl := download.NewQBittorrent("seedbox", cfg)
 		err := dl.Connect(t.Context())
 
-		// Should fail on SSH, not on login
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "ssh")
+		require.NoError(t, err)
 	})
 
 	t.Run("LoginWithoutCredentials_Forbidden", func(t *testing.T) {
@@ -659,19 +650,5 @@ func TestQBittorrentClose(t *testing.T) {
 		// Should not panic or error when closing without connecting
 		err := dl.Close()
 		assert.NoError(t, err)
-	})
-}
-
-// --- OpenFile Tests ---
-
-func TestQBittorrentOpenFile(t *testing.T) {
-	t.Run("OpenFile_NoConnection", func(t *testing.T) {
-		cfg := config.DownloaderConfig{URL: "http://localhost:8080"}
-		dl := download.NewQBittorrent("seedbox", cfg)
-
-		// Without connecting, SFTP client is nil
-		_, err := dl.OpenFile(t.Context(), "/path/to/file")
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "not connected")
 	})
 }

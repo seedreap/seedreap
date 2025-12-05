@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -14,6 +13,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/seedreap/seedreap/internal/download"
+	"github.com/seedreap/seedreap/internal/fileutil"
 	"github.com/seedreap/seedreap/internal/transfer"
 )
 
@@ -733,8 +733,6 @@ func (s *Syncer) MoveToFinal(job *SyncJob) error {
 			continue
 		}
 
-		// Calculate final path
-		// Note: file.Path already includes the torrent name as the first component
 		finalFilePath := filepath.Join(job.FinalPath, file.Path)
 
 		// Create parent directory
@@ -745,7 +743,7 @@ func (s *Syncer) MoveToFinal(job *SyncJob) error {
 		// Move file
 		if renameErr := os.Rename(file.LocalPath, finalFilePath); renameErr != nil {
 			// If rename fails (cross-device), try copy+delete
-			if copyErr := copyFile(file.LocalPath, finalFilePath); copyErr != nil {
+			if copyErr := fileutil.CopyFile(file.LocalPath, finalFilePath); copyErr != nil {
 				return fmt.Errorf("failed to move file %s: %w", file.Path, copyErr)
 			}
 			_ = os.Remove(file.LocalPath)
@@ -798,29 +796,4 @@ func (s *Syncer) RemoveJob(id string) {
 	s.jobsMu.Lock()
 	defer s.jobsMu.Unlock()
 	delete(s.jobs, id)
-}
-
-func copyFile(src, dst string) (retErr error) {
-	srcFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if closeErr := srcFile.Close(); closeErr != nil && retErr == nil {
-			retErr = closeErr
-		}
-	}()
-
-	dstFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if closeErr := dstFile.Close(); closeErr != nil && retErr == nil {
-			retErr = closeErr
-		}
-	}()
-
-	_, err = io.Copy(dstFile, srcFile)
-	return err
 }

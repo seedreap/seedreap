@@ -16,7 +16,6 @@ package download
 
 import (
     "context"
-    "io"
 
     "github.com/rs/zerolog"
 
@@ -79,11 +78,6 @@ func (c *mydownloaderClient) GetDownload(ctx context.Context, id string) (*Downl
 
 func (c *mydownloaderClient) GetFiles(ctx context.Context, id string) ([]File, error) {
     // Get files for a download
-    return nil, nil
-}
-
-func (c *mydownloaderClient) OpenFile(ctx context.Context, path string) (io.ReadCloser, error) {
-    // Open a file for reading (used for direct transfers)
     return nil, nil
 }
 
@@ -256,7 +250,6 @@ type Downloader interface {
     ListDownloads(ctx context.Context, categories []string) ([]Download, error)
     GetDownload(ctx context.Context, id string) (*Download, error)
     GetFiles(ctx context.Context, id string) ([]File, error)
-    OpenFile(ctx context.Context, path string) (io.ReadCloser, error)
     SSHConfig() config.SSHConfig
 }
 ```

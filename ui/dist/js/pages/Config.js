@@ -2,7 +2,7 @@
 
 import m from 'mithril';
 import { appsList, downloadersList } from '../state.js';
-import { getIconUrl, hasIcon } from '../utils/icons.js';
+import { getIconUrl } from '../utils/icons.js';
 
 // State for modal
 const modalState = {
