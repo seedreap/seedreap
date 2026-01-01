@@ -3,7 +3,7 @@ module github.com/seedreap/seedreap
 go 1.25
 
 require (
-	github.com/labstack/echo/v4 v4.14.0
+	github.com/labstack/echo/v4 v4.15.0
 	github.com/rclone/rclone v1.72.1
 	github.com/rs/zerolog v1.34.0
 	github.com/spf13/cobra v1.10.2
