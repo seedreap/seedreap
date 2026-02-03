@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.0](https://github.com/seedreap/seedreap/compare/v0.1.0...v0.2.0) (2026-02-03)
+
+
+### Features
+
+* remove old ssh connection and other dead code ([#24](https://github.com/seedreap/seedreap/issues/24)) ([a25a189](https://github.com/seedreap/seedreap/commit/a25a18911bd7ad290b8266f73223e05f585f9a2c))
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/rclone/rclone to v1.72.1 ([#29](https://github.com/seedreap/seedreap/issues/29)) ([4112eaf](https://github.com/seedreap/seedreap/commit/4112eaf99a3fe3b7629c9d6a34d6358d2183b0b8))
+* **deps:** update module github.com/rclone/rclone to v1.73.0 ([#38](https://github.com/seedreap/seedreap/issues/38)) ([888ef4e](https://github.com/seedreap/seedreap/commit/888ef4ef5350655272831f6723186c57d01ca6a4))
+* **deps:** update module golang.org/x/crypto to v0.46.0 ([#26](https://github.com/seedreap/seedreap/issues/26)) ([37d388e](https://github.com/seedreap/seedreap/commit/37d388e9023ed68cefa45c3b0c826ace7b674524))
+* **deps:** update module golang.org/x/crypto to v0.47.0 ([#33](https://github.com/seedreap/seedreap/issues/33)) ([2ef80e1](https://github.com/seedreap/seedreap/commit/2ef80e1b459f04aa217c764718c050ee874aab10))
+
 ## 0.1.0 (2025-12-05)
 
 
