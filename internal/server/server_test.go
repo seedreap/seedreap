@@ -2,6 +2,7 @@
 package server
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,20 +14,30 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/seedreap/seedreap/internal/config"
+	"github.com/seedreap/seedreap/internal/ent/generated"
+	"github.com/seedreap/seedreap/internal/ent/generated/app"
+	"github.com/seedreap/seedreap/internal/ent/generated/downloadclient"
 	testutil "github.com/seedreap/seedreap/internal/testing"
 )
 
 // loadConfigFromYAML creates a temp config file and loads it using config.Load().
 // This ensures tests use the exact same config loading code as the application.
+// Each test gets an isolated in-memory database to prevent state leaking between tests.
 func loadConfigFromYAML(t *testing.T, yaml string) config.Config {
 	t.Helper()
+
+	// Add isolated database config for tests (non-shared in-memory database)
+	// This ensures each test gets its own database instance
+	if !strings.Contains(yaml, "database:") {
+		yaml = "database:\n  dsn: \":memory:\"\n" + yaml
+	}
 
 	// Create temp directory for config file
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "config.yaml")
 
 	// Write YAML to temp file
-	err := os.WriteFile(configFile, []byte(yaml), 0644)
+	err := os.WriteFile(configFile, []byte(yaml), 0600)
 	require.NoError(t, err, "failed to write temp config file")
 
 	// Load using the same function the app uses
@@ -740,4 +751,273 @@ apps:
 	assert.False(t, cfg.Apps["sonarr"].CleanupOnRemove)
 	assert.False(t, cfg.Apps["radarr"].CleanupOnCategoryChange)
 	assert.True(t, cfg.Apps["radarr"].CleanupOnRemove)
+}
+
+func TestServerNew_InitializesStoreAndEventBus(t *testing.T) {
+	yaml := `
+sync:
+  downloadsPath: /downloads
+  syncingPath: /downloads/syncing
+`
+
+	cfg := loadConfigFromYAMLWithSSH(t, yaml)
+
+	opts := Options{
+		Logger: zerolog.Nop(),
+	}
+
+	srv, err := New(cfg, opts)
+	require.NoError(t, err)
+	require.NotNil(t, srv)
+
+	// Verify database is initialized
+	assert.NotNil(t, srv.DB())
+
+	// Verify event bus is initialized
+	assert.NotNil(t, srv.EventBus())
+	assert.Equal(t, 0, srv.EventBus().SubscriberCount())
+}
+
+func TestServerNew_LoadsDownloadersIntoDatabase(t *testing.T) {
+	yaml := `
+sync:
+  downloadsPath: /downloads
+  syncingPath: /downloads/syncing
+
+downloaders:
+  seedbox1:
+    type: qbittorrent
+    url: http://seedbox1:8080
+    username: admin
+    password: secret
+    httpTimeout: 60s
+    ssh:
+      host: seedbox1.example.com
+      port: 2222
+      user: user1
+      keyFile: {{KEY_FILE}}
+      knownHostsFile: {{KNOWN_HOSTS_FILE}}
+      timeout: 30s
+  seedbox2:
+    type: qbittorrent
+    url: http://seedbox2:8080
+    ssh:
+      host: seedbox2.example.com
+      user: user2
+      keyFile: {{KEY_FILE}}
+      ignoreHostKey: true
+`
+
+	cfg := loadConfigFromYAMLWithSSH(t, yaml)
+
+	opts := Options{
+		Logger: zerolog.Nop(),
+	}
+
+	srv, err := New(cfg, opts)
+	require.NoError(t, err)
+	require.NotNil(t, srv)
+
+	// Verify downloaders are in the database
+	downloaders, err := srv.DB().DownloadClient.Query().All(context.Background())
+	require.NoError(t, err)
+	assert.Len(t, downloaders, 2)
+
+	// Find seedbox1 and verify its fields
+	var seedbox1 *generated.DownloadClient
+	for _, d := range downloaders {
+		if d.Name == "seedbox1" {
+			seedbox1 = d
+			break
+		}
+	}
+	require.NotNil(t, seedbox1, "seedbox1 not found in database")
+	assert.Equal(t, "qbittorrent", seedbox1.Type)
+	assert.Equal(t, "http://seedbox1:8080", seedbox1.URL)
+	assert.Equal(t, "admin", seedbox1.Username)
+	assert.Equal(t, "secret", seedbox1.Password)
+	assert.Equal(t, int64(60), seedbox1.HTTPTimeout)
+	assert.True(t, seedbox1.Enabled)
+	assert.Equal(t, "seedbox1.example.com", seedbox1.SSHHost)
+	assert.Equal(t, 2222, seedbox1.SSHPort)
+	assert.Equal(t, "user1", seedbox1.SSHUser)
+	assert.False(t, seedbox1.SSHIgnoreHostKey)
+	assert.Equal(t, int64(30), seedbox1.SSHTimeout)
+
+	// Find seedbox2 and verify ignoreHostKey
+	var seedbox2 *generated.DownloadClient
+	for _, d := range downloaders {
+		if d.Name == "seedbox2" {
+			seedbox2 = d
+			break
+		}
+	}
+	require.NotNil(t, seedbox2, "seedbox2 not found in database")
+	assert.True(t, seedbox2.SSHIgnoreHostKey)
+	assert.Empty(t, seedbox2.SSHKnownHostsFile)
+}
+
+func TestServerNew_LoadsAppsIntoDatabase(t *testing.T) {
+	yaml := `
+sync:
+  downloadsPath: /downloads
+  syncingPath: /downloads/syncing
+
+apps:
+  sonarr:
+    type: sonarr
+    url: http://sonarr:8989
+    apiKey: sonarr-key
+    category: tv-sonarr
+    downloadsPath: /custom/tv
+    httpTimeout: 45s
+    cleanupOnCategoryChange: true
+    cleanupOnRemove: false
+  radarr:
+    type: radarr
+    url: http://radarr:7878
+    apiKey: radarr-key
+    category: movies-radarr
+    cleanupOnCategoryChange: false
+    cleanupOnRemove: true
+  misc:
+    type: passthrough
+    category: misc
+`
+
+	cfg := loadConfigFromYAMLWithSSH(t, yaml)
+
+	opts := Options{
+		Logger: zerolog.Nop(),
+	}
+
+	srv, err := New(cfg, opts)
+	require.NoError(t, err)
+	require.NotNil(t, srv)
+
+	// Verify apps are in the database
+	apps, err := srv.DB().App.Query().All(context.Background())
+	require.NoError(t, err)
+	assert.Len(t, apps, 3)
+
+	// Find sonarr and verify its fields
+	var sonarr *generated.App
+	for _, a := range apps {
+		if a.Name == "sonarr" {
+			sonarr = a
+			break
+		}
+	}
+	require.NotNil(t, sonarr, "sonarr not found in database")
+	assert.Equal(t, app.TypeSonarr, sonarr.Type)
+	assert.Equal(t, "http://sonarr:8989", sonarr.URL)
+	assert.Equal(t, "sonarr-key", sonarr.APIKey)
+	assert.Equal(t, "tv-sonarr", sonarr.Category)
+	assert.Equal(t, "/custom/tv", sonarr.DownloadsPath)
+	assert.Equal(t, int64(45), sonarr.HTTPTimeout)
+	assert.True(t, sonarr.Enabled)
+	assert.True(t, sonarr.CleanupOnCategoryChange)
+	assert.False(t, sonarr.CleanupOnRemove)
+
+	// Find radarr and verify cleanup options
+	var radarr *generated.App
+	for _, a := range apps {
+		if a.Name == "radarr" {
+			radarr = a
+			break
+		}
+	}
+	require.NotNil(t, radarr, "radarr not found in database")
+	assert.False(t, radarr.CleanupOnCategoryChange)
+	assert.True(t, radarr.CleanupOnRemove)
+
+	// Find misc (passthrough) and verify
+	var misc *generated.App
+	for _, a := range apps {
+		if a.Name == "misc" {
+			misc = a
+			break
+		}
+	}
+	require.NotNil(t, misc, "misc not found in database")
+	assert.Equal(t, app.TypePassthrough, misc.Type)
+	assert.Equal(t, "misc", misc.Category)
+	assert.Empty(t, misc.URL)
+	assert.Empty(t, misc.APIKey)
+}
+
+func TestServerNew_EmptyConfigLoadsEmptyDatabase(t *testing.T) {
+	yaml := `
+sync:
+  downloadsPath: /downloads
+  syncingPath: /downloads/syncing
+`
+
+	cfg := loadConfigFromYAMLWithSSH(t, yaml)
+
+	opts := Options{
+		Logger: zerolog.Nop(),
+	}
+
+	srv, err := New(cfg, opts)
+	require.NoError(t, err)
+	require.NotNil(t, srv)
+
+	// Verify no downloaders in database
+	downloaders, err := srv.DB().DownloadClient.Query().All(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, downloaders)
+
+	// Verify no apps in database
+	apps, err := srv.DB().App.Query().All(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, apps)
+}
+
+func TestServerNew_ListEnabledFromDatabase(t *testing.T) {
+	yaml := `
+sync:
+  downloadsPath: /downloads
+  syncingPath: /downloads/syncing
+
+downloaders:
+  seedbox:
+    type: qbittorrent
+    url: http://seedbox:8080
+    ssh:
+      host: seedbox.example.com
+      user: seeduser
+      keyFile: {{KEY_FILE}}
+      ignoreHostKey: true
+
+apps:
+  sonarr:
+    type: sonarr
+    url: http://sonarr:8989
+    apiKey: test-key
+    category: tv-sonarr
+`
+
+	cfg := loadConfigFromYAMLWithSSH(t, yaml)
+
+	opts := Options{
+		Logger: zerolog.Nop(),
+	}
+
+	srv, err := New(cfg, opts)
+	require.NoError(t, err)
+	require.NotNil(t, srv)
+
+	// All items should be enabled by default
+	enabledDownloaders, err := srv.DB().DownloadClient.Query().
+		Where(downloadclient.EnabledEQ(true)).
+		All(context.Background())
+	require.NoError(t, err)
+	assert.Len(t, enabledDownloaders, 1)
+
+	enabledApps, err := srv.DB().App.Query().
+		Where(app.EnabledEQ(true)).
+		All(context.Background())
+	require.NoError(t, err)
+	assert.Len(t, enabledApps, 1)
 }

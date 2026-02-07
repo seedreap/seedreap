@@ -24,9 +24,18 @@ const (
 // Config is the application configuration.
 type Config struct {
 	Server      ServerConfig                `mapstructure:"server"`
+	Database    DatabaseConfig              `mapstructure:"database"`
 	Downloaders map[string]DownloaderConfig `mapstructure:"downloaders"`
 	Apps        map[string]AppEntryConfig   `mapstructure:"apps"`
 	Sync        SyncConfig                  `mapstructure:"sync"`
+}
+
+// DatabaseConfig holds database configuration.
+type DatabaseConfig struct {
+	// DSN is the database connection string.
+	// For SQLite: "file:path/to/db.sqlite" or "file::memory:?cache=shared" for in-memory.
+	// Default: "file::memory:?cache=shared" (shared in-memory database)
+	DSN string `mapstructure:"dsn"`
 }
 
 // ServerConfig holds HTTP server configuration.
@@ -121,6 +130,7 @@ func Load(opts LoadOptions) (Config, error) {
 
 	// Set defaults
 	v.SetDefault("server.listen", "[::]:8423")
+	v.SetDefault("database.dsn", "file::memory:?cache=shared")
 	v.SetDefault("sync.downloadsPath", "/downloads")
 	v.SetDefault("sync.syncingPath", "/downloads/syncing")
 	v.SetDefault("sync.maxConcurrent", DefaultMaxConcurrent)

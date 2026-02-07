@@ -20,12 +20,12 @@ ARG BUILD_DATE=unknown
 ARG BUILT_BY=unknown
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
-    -ldflags="-s -w \
-      -X github.com/seedreap/seedreap/cmd.Version=${VERSION} \
-      -X github.com/seedreap/seedreap/cmd.Commit=${COMMIT} \
-      -X github.com/seedreap/seedreap/cmd.BuildDate=${BUILD_DATE} \
-      -X github.com/seedreap/seedreap/cmd.BuiltBy=${BUILT_BY}" \
-    -o /seedreap .
+  -ldflags="-s -w \
+  -X github.com/seedreap/seedreap/cmd.Version=${VERSION} \
+  -X github.com/seedreap/seedreap/cmd.Commit=${COMMIT} \
+  -X github.com/seedreap/seedreap/cmd.BuildDate=${BUILD_DATE} \
+  -X github.com/seedreap/seedreap/cmd.BuiltBy=${BUILT_BY}" \
+  -o /seedreap .
 
 # Runtime stage - using distroless for minimal attack surface
 FROM gcr.io/distroless/static:nonroot

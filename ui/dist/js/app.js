@@ -9,7 +9,7 @@ import Layout from './components/Layout.js';
 import Dashboard from './pages/Dashboard.js';
 import Config from './pages/Config.js';
 import Settings from './pages/Settings.js';
-import Timeline from './pages/Timeline.js';
+import Events from './pages/Events.js';
 
 // Wrap page in layout
 function withLayout(PageComponent) {
@@ -40,5 +40,5 @@ m.route(document.getElementById('app'), '/', {
     '/': withLayout(Dashboard),
     '/config': withLayout(Config),
     '/settings': withLayout(Settings),
-    '/timeline': withLayout(Timeline)
+    '/events': withLayout(Events)
 });

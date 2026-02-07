@@ -9,13 +9,15 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/seedreap/seedreap/internal/api"
 	"github.com/seedreap/seedreap/internal/app"
 	"github.com/seedreap/seedreap/internal/config"
 	"github.com/seedreap/seedreap/internal/download"
+	"github.com/seedreap/seedreap/internal/ent"
+	"github.com/seedreap/seedreap/internal/ent/generated"
+	appschema "github.com/seedreap/seedreap/internal/ent/generated/app"
+	"github.com/seedreap/seedreap/internal/events"
 	"github.com/seedreap/seedreap/internal/filesync"
-	"github.com/seedreap/seedreap/internal/orchestrator"
-	"github.com/seedreap/seedreap/internal/timeline"
+	"github.com/seedreap/seedreap/internal/tracker"
 	"github.com/seedreap/seedreap/internal/transfer"
 )
 
@@ -33,12 +35,18 @@ type Options struct {
 
 // Server is the main application server.
 type Server struct {
-	cfg          config.Config
-	opts         Options
-	apiServer    *api.Server
-	orchestrator *orchestrator.Orchestrator
-	syncer       *filesync.Syncer
-	logger       zerolog.Logger
+	cfg               config.Config
+	opts              Options
+	db                *generated.Client
+	eventBus          *events.Bus
+	httpServer        *HTTPServer
+	controller        *download.Controller
+	syncController    *filesync.Controller
+	appController     *app.Controller
+	eventsController  *events.Controller
+	trackerController *tracker.Controller
+	syncer            *filesync.Syncer
+	logger            zerolog.Logger
 }
 
 // New creates a new server with the given configuration.
@@ -50,89 +58,54 @@ func New(cfg config.Config, opts Options) (*Server, error) {
 		logger = zerolog.Nop()
 	}
 
-	// Create registries
-	dlRegistry := download.NewRegistry()
-	appRegistry := app.NewRegistry()
-
-	// Track SSH config for file transfers (use first downloader's config)
-	var transferSSHConfig config.SSHConfig
-
-	// Build downloaders from config
-	for name, dlCfg := range cfg.Downloaders {
-		logger.Debug().Str("name", name).Str("type", dlCfg.Type).Msg("configuring downloader")
-
-		switch dlCfg.Type {
-		case "qbittorrent":
-			// Store SSH config for file transfers
-			if transferSSHConfig.Host == "" {
-				transferSSHConfig = dlCfg.SSH
-			}
-
-			client := download.NewQBittorrent(
-				name,
-				dlCfg,
-				download.WithLogger(logger.With().Str("downloader", name).Logger()),
-			)
-			dlRegistry.Register(name, client)
-
-		default:
-			logger.Warn().Str("type", dlCfg.Type).Msg("unknown downloader type")
-		}
+	// Create database client
+	db, err := ent.OpenSQLite(cfg.Database.DSN)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Build apps from config
-	for name, appCfg := range cfg.Apps {
-		logger.Info().
-			Str("name", name).
-			Str("type", appCfg.Type).
-			Str("category", appCfg.Category).
-			Msg("configuring app")
-
-		// Build app config from entry config
-		arrCfg := app.ArrConfig{
-			URL:           appCfg.URL,
-			APIKey:        appCfg.APIKey,
-			Category:      appCfg.Category,
-			DownloadsPath: appCfg.DownloadsPath,
-			HTTPTimeout:   appCfg.HTTPTimeout,
-		}
-
-		switch appCfg.Type {
-		case "sonarr":
-			client := app.NewSonarr(
-				name,
-				arrCfg,
-				app.WithLogger(logger.With().Str("app", name).Logger()),
-				app.WithCleanupOnCategoryChange(appCfg.CleanupOnCategoryChange),
-				app.WithCleanupOnRemove(appCfg.CleanupOnRemove),
-			)
-			appRegistry.Register(name, client)
-
-		case "radarr":
-			client := app.NewRadarr(
-				name,
-				arrCfg,
-				app.WithLogger(logger.With().Str("app", name).Logger()),
-				app.WithCleanupOnCategoryChange(appCfg.CleanupOnCategoryChange),
-				app.WithCleanupOnRemove(appCfg.CleanupOnRemove),
-			)
-			appRegistry.Register(name, client)
-
-		case "passthrough":
-			client := app.NewPassthrough(
-				name,
-				appCfg.Category,
-				appCfg.DownloadsPath,
-				app.WithLogger(logger.With().Str("app", name).Logger()),
-				app.WithCleanupOnCategoryChange(appCfg.CleanupOnCategoryChange),
-				app.WithCleanupOnRemove(appCfg.CleanupOnRemove),
-			)
-			appRegistry.Register(name, client)
-
-		default:
-			logger.Warn().Str("type", appCfg.Type).Msg("unknown app type")
-		}
+	// Run migrations
+	if err = ent.Migrate(context.Background(), db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
+	logger.Info().Str("dsn", cfg.Database.DSN).Msg("database initialized")
+
+	// Create event bus
+	eventBus := events.New(
+		events.WithLogger(logger.With().Str("component", "events").Logger()),
+	)
+
+	// Create events controller first (persists all events to timeline via database)
+	eventsController := events.NewController(
+		eventBus,
+		db,
+		events.WithControllerLogger(logger.With().Str("component", "events-controller").Logger()),
+	)
+
+	// Load configuration into database
+	if err = loadConfigIntoDatabase(context.Background(), db, cfg, logger); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("failed to load config into database: %w", err)
+	}
+
+	// Get poll interval
+	pollInterval := cfg.Sync.PollInterval
+	if pollInterval == 0 {
+		pollInterval = defaultPollInterval
+	}
+
+	// Create download controller (polls downloaders and emits download events via database)
+	controller := download.NewController(
+		eventBus,
+		db,
+		download.WithControllerLogger(logger.With().Str("component", "controller").Logger()),
+		download.WithPollInterval(pollInterval),
+		download.WithBaseDownloadsPath(cfg.Sync.DownloadsPath),
+	)
+
+	// Get SSH config from controller for file transfers
+	transferSSHConfig := controller.SSHConfig()
 
 	// Log configuration summary
 	logger.Info().
@@ -195,51 +168,61 @@ func New(cfg config.Config, opts Options) (*Server, error) {
 
 	syncr := filesync.New(cfg.Sync.SyncingPath, syncerOpts...)
 
-	// Create timeline recorder
-	timelineRecorder := timeline.NewRecorder(
-		timeline.WithLogger(logger.With().Str("component", "timeline").Logger()),
-	)
-
-	// Create orchestrator
-	pollInterval := cfg.Sync.PollInterval
-	if pollInterval == 0 {
-		pollInterval = defaultPollInterval
+	// Create filesync controller (manages sync jobs/files and transfers via database)
+	syncControllerOpts := []filesync.ControllerOption{
+		filesync.WithControllerLogger(logger.With().Str("component", "sync-controller").Logger()),
+		filesync.WithControllerSyncingPath(cfg.Sync.SyncingPath),
+		filesync.WithControllerDownloadsPath(cfg.Sync.DownloadsPath),
+		filesync.WithControllerMaxConcurrent(maxConcurrent),
+		filesync.WithControllerSyncer(syncr), // For live progress tracking
 	}
+	if transferer != nil {
+		syncControllerOpts = append(syncControllerOpts, filesync.WithControllerTransferer(transferer))
+	}
+	syncController := filesync.NewController(eventBus, db, syncControllerOpts...)
 
-	orch := orchestrator.New(
-		dlRegistry,
-		appRegistry,
-		syncr,
-		cfg.Sync.DownloadsPath,
-		orchestrator.WithLogger(logger.With().Str("component", "orchestrator").Logger()),
-		orchestrator.WithPollInterval(pollInterval),
-		orchestrator.WithTimeline(timelineRecorder),
+	// Create app controller (handles app notifications via database)
+	appController := app.NewController(
+		eventBus,
+		db,
+		app.WithControllerLogger(logger.With().Str("component", "app-controller").Logger()),
 	)
 
-	// Create API server
-	apiOpts := []api.Option{
-		api.WithLogger(logger.With().Str("component", "api").Logger()),
+	// Create tracker controller (maintains TrackedDownload state via database)
+	trackerController := tracker.NewController(
+		eventBus,
+		db,
+		tracker.WithControllerLogger(logger.With().Str("component", "tracker-controller").Logger()),
+	)
+
+	// Create HTTP server
+	httpOpts := []HTTPOption{
+		WithHTTPLogger(logger.With().Str("component", "api").Logger()),
+		WithHTTPDB(db),
 	}
 
 	if opts.UIFS != (embed.FS{}) {
-		apiOpts = append(apiOpts, api.WithUI(opts.UIFS, opts.UIPath))
+		httpOpts = append(httpOpts, WithUI(opts.UIFS, opts.UIPath))
 	}
 
-	apiServer := api.New(
-		orch,
-		dlRegistry,
-		appRegistry,
+	httpServer := NewHTTPServer(
 		syncr,
-		apiOpts...,
+		httpOpts...,
 	)
 
 	return &Server{
-		cfg:          cfg,
-		opts:         opts,
-		apiServer:    apiServer,
-		orchestrator: orch,
-		syncer:       syncr,
-		logger:       logger,
+		cfg:               cfg,
+		opts:              opts,
+		db:                db,
+		eventBus:          eventBus,
+		httpServer:        httpServer,
+		controller:        controller,
+		syncController:    syncController,
+		appController:     appController,
+		eventsController:  eventsController,
+		trackerController: trackerController,
+		syncer:            syncr,
+		logger:            logger,
 	}, nil
 }
 
@@ -251,15 +234,45 @@ func (s *Server) Run(ctx context.Context) error {
 		Str("syncing_path", s.cfg.Sync.SyncingPath).
 		Msg("starting seedreap")
 
-	// Start orchestrator
-	if err := s.orchestrator.Start(ctx); err != nil {
-		return fmt.Errorf("failed to start orchestrator: %w", err)
+	// Start events controller first (records all events to timeline)
+	if err := s.eventsController.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start events controller: %w", err)
+	}
+
+	// Start tracker controller (maintains TrackedDownload state)
+	if err := s.trackerController.Start(ctx); err != nil {
+		_ = s.eventsController.Stop()
+		return fmt.Errorf("failed to start tracker controller: %w", err)
+	}
+
+	// Start app controller (listens for MoveComplete events)
+	if err := s.appController.Start(ctx); err != nil {
+		_ = s.trackerController.Stop()
+		_ = s.eventsController.Stop()
+		return fmt.Errorf("failed to start app controller: %w", err)
+	}
+
+	// Start filesync controller (handles file sync, move, cleanup, and category changes)
+	if err := s.syncController.Start(ctx); err != nil {
+		_ = s.appController.Stop()
+		_ = s.trackerController.Stop()
+		_ = s.eventsController.Stop()
+		return fmt.Errorf("failed to start filesync controller: %w", err)
+	}
+
+	// Start download controller last (emits download events)
+	if err := s.controller.Start(ctx); err != nil {
+		_ = s.syncController.Stop()
+		_ = s.appController.Stop()
+		_ = s.trackerController.Stop()
+		_ = s.eventsController.Stop()
+		return fmt.Errorf("failed to start download controller: %w", err)
 	}
 
 	// Start server in goroutine
 	errCh := make(chan error, 1)
 	go func() {
-		if err := s.apiServer.Start(s.cfg.Server.Listen); err != nil {
+		if err := s.httpServer.Start(s.cfg.Server.Listen); err != nil {
 			errCh <- err
 		}
 	}()
@@ -285,17 +298,128 @@ func (s *Server) PrepareShutdown() {
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.logger.Info().Msg("shutting down...")
 
-	if err := s.apiServer.Shutdown(ctx); err != nil {
+	if err := s.httpServer.Shutdown(ctx); err != nil {
 		s.logger.Error().Err(err).Msg("server shutdown error")
 	}
 
-	s.orchestrator.Stop()
+	// Stop in reverse order of startup (publishers first, then subscribers)
+
+	// Stop download controller first to stop emitting new events
+	if err := s.controller.Stop(); err != nil {
+		s.logger.Error().Err(err).Msg("download controller stop error")
+	}
+
+	// Stop filesync controller (can still process pending sync events)
+	if err := s.syncController.Stop(); err != nil {
+		s.logger.Error().Err(err).Msg("filesync controller stop error")
+	}
+
+	// Stop app controller (can still process pending MoveComplete events)
+	if err := s.appController.Stop(); err != nil {
+		s.logger.Error().Err(err).Msg("app controller stop error")
+	}
+
+	// Stop tracker controller
+	if err := s.trackerController.Stop(); err != nil {
+		s.logger.Error().Err(err).Msg("tracker controller stop error")
+	}
+
+	// Stop events controller last (records events until the very end)
+	if err := s.eventsController.Stop(); err != nil {
+		s.logger.Error().Err(err).Msg("events controller stop error")
+	}
 
 	// Close the syncer to release transfer backend resources
 	if err := s.syncer.Close(); err != nil {
 		s.logger.Error().Err(err).Msg("syncer close error")
 	}
 
+	// Close the event bus
+	s.eventBus.Close()
+
+	// Close the database client
+	if err := s.db.Close(); err != nil {
+		s.logger.Error().Err(err).Msg("database close error")
+	}
+
 	s.logger.Info().Msg("shutdown complete")
+	return nil
+}
+
+// DB returns the Ent database client.
+func (s *Server) DB() *generated.Client {
+	return s.db
+}
+
+// EventBus returns the event bus.
+func (s *Server) EventBus() *events.Bus {
+	return s.eventBus
+}
+
+// Controller returns the download controller.
+func (s *Server) Controller() *download.Controller {
+	return s.controller
+}
+
+// loadConfigIntoDatabase loads downloaders and apps from config into the database.
+func loadConfigIntoDatabase(ctx context.Context, db *generated.Client, cfg config.Config, logger zerolog.Logger) error {
+	// Load downloaders
+	for name, dlCfg := range cfg.Downloaders {
+		_, err := db.DownloadClient.Create().
+			SetName(name).
+			SetType(dlCfg.Type).
+			SetURL(dlCfg.URL).
+			SetUsername(dlCfg.Username).
+			SetPassword(dlCfg.Password).
+			SetHTTPTimeout(int64(dlCfg.HTTPTimeout.Seconds())).
+			SetEnabled(true).
+			SetSSHHost(dlCfg.SSH.Host).
+			SetSSHPort(dlCfg.SSH.Port).
+			SetSSHUser(dlCfg.SSH.User).
+			SetSSHKeyFile(dlCfg.SSH.KeyFile).
+			SetSSHKnownHostsFile(dlCfg.SSH.KnownHostsFile).
+			SetSSHIgnoreHostKey(dlCfg.SSH.IgnoreHostKey).
+			SetSSHTimeout(int64(dlCfg.SSH.Timeout.Seconds())).
+			Save(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to create downloader %q: %w", name, err)
+		}
+
+		logger.Debug().
+			Str("name", name).
+			Str("type", dlCfg.Type).
+			Msg("loaded downloader into database")
+	}
+
+	// Load apps
+	for name, appCfg := range cfg.Apps {
+		_, err := db.App.Create().
+			SetName(name).
+			SetType(appschema.Type(appCfg.Type)).
+			SetURL(appCfg.URL).
+			SetAPIKey(appCfg.APIKey).
+			SetCategory(appCfg.Category).
+			SetDownloadsPath(appCfg.DownloadsPath).
+			SetHTTPTimeout(int64(appCfg.HTTPTimeout.Seconds())).
+			SetCleanupOnCategoryChange(appCfg.CleanupOnCategoryChange).
+			SetCleanupOnRemove(appCfg.CleanupOnRemove).
+			SetEnabled(true).
+			Save(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to create app %q: %w", name, err)
+		}
+
+		logger.Debug().
+			Str("name", name).
+			Str("type", appCfg.Type).
+			Str("category", appCfg.Category).
+			Msg("loaded app into database")
+	}
+
+	logger.Info().
+		Int("downloaders", len(cfg.Downloaders)).
+		Int("apps", len(cfg.Apps)).
+		Msg("configuration loaded into database")
+
 	return nil
 }

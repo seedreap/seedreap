@@ -180,6 +180,6 @@ func setupLogging() {
 
 	// Setup output based on CLI flag
 	if logPretty {
-		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr}) //nolint:reassign // standard zerolog pattern
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout}) //nolint:reassign // standard zerolog pattern
 	}
 }

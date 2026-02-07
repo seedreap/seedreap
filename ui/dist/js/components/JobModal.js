@@ -1,9 +1,8 @@
-// JobModal component - shows job details with files and timeline
+// JobModal component - shows job details with files and events
 
 import m from 'mithril';
-import { jobs, setFileSort, getSortedFiles, getDisplayState, getJobProgress } from '../state.js';
-import { timeline } from '../state.js';
-import { fetchJobDetails, fetchTimeline } from '../api.js';
+import { jobs, setFileSort, getSortedFiles, getDisplayState, getJobProgress, eventsList } from '../state.js';
+import { fetchJobDetails, fetchEvents } from '../api.js';
 import { formatBytes, formatSpeed, formatRelativeTime, formatTimestamp } from '../utils/format.js';
 import {
     getJobStatusBadgeClass,
@@ -25,10 +24,10 @@ export function openJobModal(job) {
     modalState.job = job;
     modalState.loading = true;
 
-    // Fetch download details and timeline
+    // Fetch download details and events
     Promise.all([
-        fetchJobDetails(job.id, job.downloader),
-        timeline.events.length === 0 ? fetchTimeline() : Promise.resolve()
+        fetchJobDetails(job.id),
+        eventsList.items.length === 0 ? fetchEvents() : Promise.resolve()
     ]).finally(() => {
         modalState.loading = false;
         m.redraw();
@@ -120,11 +119,11 @@ const FilesTable = {
     }
 };
 
-// Get event details for display
+// Get event details for display (details already parsed by normalizeEvent in api.js)
 function getEventDetails(event) {
     const details = [];
 
-    if (event.details) {
+    if (event.details && typeof event.details === 'object') {
         for (const [key, value] of Object.entries(event.details)) {
             let displayValue = value;
             if (key === 'size' || key === 'completed_size') {
@@ -137,19 +136,18 @@ function getEventDetails(event) {
     return details;
 }
 
-// Timeline table component
-const TimelineTable = {
+// Events table component
+const EventsTable = {
     view: (vnode) => {
         const { job } = vnode.attrs;
 
-        // Filter events for this job
-        const jobEvents = timeline.events.filter(event =>
-            event.download_id === job.id ||
-            event.download_name === job.name
+        // Filter events for this job by subject_id (download job ID)
+        const jobEvents = eventsList.items.filter(event =>
+            event.subject_id === job.id
         );
 
         if (jobEvents.length === 0) {
-            return m('.text-center.py-4.text-base-content/50', 'No timeline events for this job');
+            return m('.text-center.py-4.text-base-content/50', 'No events for this job');
         }
 
         return m('.overflow-x-auto', [
@@ -195,8 +193,8 @@ const JobModal = {
     view: () => {
         if (!modalState.isOpen || !modalState.job) return null;
 
-        // Get fresh download data from the list
-        const job = jobs.list.find(j => j.id === modalState.job.id && j.downloader === modalState.job.downloader) || modalState.job;
+        // Get fresh download data from the list (ID is a ULID, globally unique)
+        const job = jobs.list.find(j => j.id === modalState.job.id) || modalState.job;
         const displayState = getDisplayState(job);
         const progressInfo = getJobProgress(job);
 
@@ -264,10 +262,10 @@ const JobModal = {
                                 m(FilesTable, { job })
                             ]),
 
-                            // Timeline section
+                            // Events section
                             m('section', [
-                                m('h4.font-semibold.mb-2', 'Timeline'),
-                                m(TimelineTable, { job })
+                                m('h4.font-semibold.mb-2', 'Events'),
+                                m(EventsTable, { job })
                             ])
                         ]
                 ]),

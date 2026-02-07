@@ -1,7 +1,7 @@
 // API module - all server communication
 
 import m from 'mithril';
-import { connection, stats, jobs, appsList, downloadersList, timeline } from './state.js';
+import { connection, stats, jobs, appsList, downloadersList, eventsList } from './state.js';
 import { setHistory, addPoint } from './utils/sparkline.js';
 
 // Fetch stats from server
@@ -20,14 +20,48 @@ export async function fetchStats() {
     }
 }
 
+// Normalize job data from API to match UI expectations
+function normalizeJob(job) {
+    // Map high-level state
+    job.status = job.state;
+
+    // Use total_size from API (was previously called size)
+    job.total_size = job.total_size || 0;
+    job.total_files = job.total_files || 0;
+    job.completed_size = job.completed_size || 0;
+    job.bytes_per_sec = job.bytes_per_sec || 0;
+
+    // Extract seedbox state from download_job
+    if (job.download_job) {
+        job.seedbox_state = job.download_job.status;
+        job.seedbox_progress = job.download_job.progress || 0;
+        job.seedbox_downloaded = job.download_job.downloaded || 0;
+        job.seedbox_speed = job.download_job.download_speed || 0;
+    }
+
+    // Normalize files to use consistent field names
+    if (job.files) {
+        for (const file of job.files) {
+            // Map sync_status to status for backward compatibility
+            file.status = file.sync_status || 'pending';
+            // Map synced_size to transferred for backward compatibility
+            file.transferred = file.synced_size || 0;
+        }
+    }
+
+    return job;
+}
+
 // Fetch all downloads
 export async function fetchJobs() {
     try {
         const newJobs = await m.request({ url: '/api/downloads' });
 
-        // Preserve files data from cached downloads
+        // Normalize and preserve files data from cached downloads
         for (const job of newJobs) {
-            const cached = jobs.list.find(j => j.id === job.id && j.downloader === job.downloader);
+            normalizeJob(job);
+            // IDs are ULIDs (globally unique), no need to also match downloader
+            const cached = jobs.list.find(j => j.id === job.id);
             if (cached && cached.files) {
                 job.files = cached.files;
             }
@@ -37,7 +71,7 @@ export async function fetchJobs() {
         for (const job of newJobs) {
             if (job.status === 'syncing' && !job.files) {
                 try {
-                    const detail = await m.request({ url: `/api/downloaders/${job.downloader}/downloads/${job.id}` });
+                    const detail = await m.request({ url: `/api/downloads/${job.id}` });
                     job.files = detail.files || [];
                 } catch (e) {
                     console.error('Failed to fetch download details:', e);
@@ -52,21 +86,18 @@ export async function fetchJobs() {
 }
 
 // Fetch download details (files)
-export async function fetchJobDetails(jobId, downloader) {
+export async function fetchJobDetails(jobId) {
     try {
-        // If downloader is not provided, try to find it from the jobs list
-        if (!downloader) {
-            const job = jobs.list.find(j => j.id === jobId);
-            downloader = job?.downloader;
-        }
-        if (!downloader) {
-            console.error('No downloader found for job:', jobId);
-            return null;
-        }
-        const detail = await m.request({ url: `/api/downloaders/${downloader}/downloads/${jobId}` });
-        const job = jobs.list.find(j => j.id === jobId && j.downloader === downloader);
+        const detail = await m.request({ url: `/api/downloads/${jobId}` });
+        normalizeJob(detail);
+        const job = jobs.list.find(j => j.id === jobId);
         if (job) {
             job.files = detail.files || [];
+            // Update job with latest data from detail
+            job.total_size = detail.total_size;
+            job.completed_size = detail.completed_size;
+            job.bytes_per_sec = detail.bytes_per_sec;
+            job.total_files = detail.total_files || (detail.files ? detail.files.length : 0);
         }
         return detail;
     } catch (e) {
@@ -79,7 +110,7 @@ export async function fetchJobDetails(jobId, downloader) {
 export async function refreshSyncingJobFiles() {
     for (const job of jobs.list) {
         if (job.status === 'syncing') {
-            await fetchJobDetails(job.id, job.downloader);
+            await fetchJobDetails(job.id);
         }
     }
 }
@@ -116,16 +147,29 @@ export async function fetchDownloaders() {
     }
 }
 
-// Fetch timeline events
-export async function fetchTimeline() {
-    timeline.loading = true;
+// Normalize event data from API
+function normalizeEvent(event) {
+    // Parse details JSON string into object
+    if (event.details && typeof event.details === 'string') {
+        try {
+            event.details = JSON.parse(event.details);
+        } catch {
+            event.details = null;
+        }
+    }
+    return event;
+}
+
+// Fetch events
+export async function fetchEvents() {
+    eventsList.loading = true;
     try {
-        const events = await m.request({ url: '/api/timeline' });
-        timeline.events = events;
+        const events = await m.request({ url: '/api/events' });
+        eventsList.items = events.map(normalizeEvent);
     } catch (e) {
-        console.error('Failed to fetch timeline:', e);
+        console.error('Failed to fetch events:', e);
     } finally {
-        timeline.loading = false;
+        eventsList.loading = false;
     }
 }
 

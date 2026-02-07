@@ -11,135 +11,47 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/seedreap/seedreap/internal/config"
 	"github.com/seedreap/seedreap/internal/download"
+	"github.com/seedreap/seedreap/internal/ent/generated"
 )
 
-// --- Registry Tests ---
+// testDownloader creates a generated.DownloadClient for testing with the given name and URL.
+func testDownloader(name, url string) *generated.DownloadClient {
+	return &generated.DownloadClient{
+		Name: name,
+		Type: "qbittorrent",
+		URL:  url,
+	}
+}
 
-func TestRegistry(t *testing.T) {
-	t.Run("NewRegistry", func(t *testing.T) {
-		r := download.NewRegistry()
-		require.NotNil(t, r)
-		assert.Empty(t, r.All())
-	})
-
-	t.Run("Register", func(t *testing.T) {
-		r := download.NewRegistry()
-
-		// Create a mock downloader using the qBittorrent constructor
-		// Since we can't mock easily, we'll test with minimal config
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("Ok."))
-		}))
-		defer server.Close()
-
-		cfg := config.DownloaderConfig{
-			URL:      server.URL,
-			Username: "admin",
-			Password: "admin",
-		}
-		dl := download.NewQBittorrent("seedbox", cfg)
-
-		r.Register("seedbox", dl)
-
-		got, ok := r.Get("seedbox")
-		require.True(t, ok)
-		assert.Equal(t, dl, got)
-	})
-
-	t.Run("RegisterMultipleDownloaders", func(t *testing.T) {
-		r := download.NewRegistry()
-
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		}))
-		defer server.Close()
-
-		cfg := config.DownloaderConfig{URL: server.URL}
-
-		r.Register("seedbox1", download.NewQBittorrent("seedbox1", cfg))
-		r.Register("seedbox2", download.NewQBittorrent("seedbox2", cfg))
-
-		assert.Len(t, r.All(), 2)
-
-		_, ok1 := r.Get("seedbox1")
-		_, ok2 := r.Get("seedbox2")
-		assert.True(t, ok1)
-		assert.True(t, ok2)
-	})
-
-	t.Run("GetNonExistent", func(t *testing.T) {
-		r := download.NewRegistry()
-
-		got, ok := r.Get("nonexistent")
-		assert.False(t, ok)
-		assert.Nil(t, got)
-	})
-
-	t.Run("All", func(t *testing.T) {
-		r := download.NewRegistry()
-
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		}))
-		defer server.Close()
-
-		cfg := config.DownloaderConfig{URL: server.URL}
-		dl := download.NewQBittorrent("seedbox", cfg)
-		r.Register("seedbox", dl)
-
-		all := r.All()
-		assert.Len(t, all, 1)
-		assert.Equal(t, dl, all["seedbox"])
-	})
+// testDownloaderWithAuth creates a generated.DownloadClient with authentication.
+func testDownloaderWithAuth(url, password string) *generated.DownloadClient {
+	return &generated.DownloadClient{
+		Name:     "seedbox",
+		Type:     "qbittorrent",
+		URL:      url,
+		Username: "admin",
+		Password: password,
+	}
 }
 
 // --- QBittorrent Client Tests ---
 
 func TestQBittorrentClient(t *testing.T) {
 	t.Run("NewQBittorrent", func(t *testing.T) {
-		cfg := config.DownloaderConfig{
-			URL:      "http://localhost:8080",
-			Username: "admin",
-			Password: "password",
-		}
-
-		dl := download.NewQBittorrent("seedbox", cfg)
+		dl := download.NewQBittorrent(testDownloaderWithAuth("http://localhost:8080", "password"))
 
 		assert.Equal(t, "seedbox", dl.Name())
 		assert.Equal(t, "qbittorrent", dl.Type())
 	})
 
 	t.Run("WithLogger", func(t *testing.T) {
-		cfg := config.DownloaderConfig{
-			URL: "http://localhost:8080",
-		}
-
 		// Should not panic
-		dl := download.NewQBittorrent("seedbox", cfg, download.WithLogger(zerolog.Nop()))
+		dl := download.NewQBittorrent(
+			testDownloader("seedbox-2", "http://localhost:8080"),
+			download.WithLogger(zerolog.Nop()),
+		)
 		assert.NotNil(t, dl)
-	})
-
-	t.Run("SSHConfig", func(t *testing.T) {
-		cfg := config.DownloaderConfig{
-			URL: "http://localhost:8080",
-			SSH: config.SSHConfig{
-				Host:    "seedbox.example.com",
-				Port:    22,
-				User:    "user",
-				KeyFile: "/path/to/key",
-			},
-		}
-
-		dl := download.NewQBittorrent("seedbox", cfg)
-
-		sshCfg := dl.SSHConfig()
-		assert.Equal(t, "seedbox.example.com", sshCfg.Host)
-		assert.Equal(t, 22, sshCfg.Port)
-		assert.Equal(t, "user", sshCfg.User)
-		assert.Equal(t, "/path/to/key", sshCfg.KeyFile)
 	})
 
 	t.Run("URLNormalization", func(t *testing.T) {
@@ -153,11 +65,7 @@ func TestQBittorrentClient(t *testing.T) {
 		defer server.Close()
 
 		// URL with trailing slash
-		cfg := config.DownloaderConfig{
-			URL: server.URL + "/",
-		}
-
-		dl := download.NewQBittorrent("seedbox", cfg)
+		dl := download.NewQBittorrent(testDownloader("seedbox", server.URL+"/"))
 
 		// Login without credentials tests the version endpoint
 		// This will fail because SSH isn't configured, but we can verify URL handling
@@ -188,13 +96,7 @@ func TestQBittorrentLogin(t *testing.T) {
 		}))
 		defer server.Close()
 
-		cfg := config.DownloaderConfig{
-			URL:      server.URL,
-			Username: "admin",
-			Password: "password",
-		}
-
-		dl := download.NewQBittorrent("seedbox", cfg)
+		dl := download.NewQBittorrent(testDownloaderWithAuth(server.URL, "password"))
 
 		err := dl.Connect(t.Context())
 		require.NoError(t, err)
@@ -209,13 +111,7 @@ func TestQBittorrentLogin(t *testing.T) {
 		}))
 		defer server.Close()
 
-		cfg := config.DownloaderConfig{
-			URL:      server.URL,
-			Username: "admin",
-			Password: "wrongpassword",
-		}
-
-		dl := download.NewQBittorrent("seedbox", cfg)
+		dl := download.NewQBittorrent(testDownloaderWithAuth(server.URL, "wrongpassword"))
 		err := dl.Connect(t.Context())
 
 		require.Error(t, err)
@@ -231,13 +127,7 @@ func TestQBittorrentLogin(t *testing.T) {
 		}))
 		defer server.Close()
 
-		cfg := config.DownloaderConfig{
-			URL:      server.URL,
-			Username: "", // No credentials
-			Password: "",
-		}
-
-		dl := download.NewQBittorrent("seedbox", cfg)
+		dl := download.NewQBittorrent(testDownloader("seedbox", server.URL))
 		err := dl.Connect(t.Context())
 
 		require.NoError(t, err)
@@ -251,13 +141,7 @@ func TestQBittorrentLogin(t *testing.T) {
 		}))
 		defer server.Close()
 
-		cfg := config.DownloaderConfig{
-			URL:      server.URL,
-			Username: "",
-			Password: "",
-		}
-
-		dl := download.NewQBittorrent("seedbox", cfg)
+		dl := download.NewQBittorrent(testDownloader("seedbox", server.URL))
 		err := dl.Connect(t.Context())
 
 		require.Error(t, err)
@@ -303,8 +187,7 @@ func TestQBittorrentListDownloads_ReturnsAllTorrents(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := config.DownloaderConfig{URL: server.URL}
-	dl := download.NewQBittorrent("seedbox", cfg)
+	dl := download.NewQBittorrent(testDownloader("seedbox", server.URL))
 
 	downloads, err := dl.ListDownloads(t.Context(), nil)
 	require.NoError(t, err)
@@ -350,8 +233,7 @@ func TestQBittorrentListDownloads_FilterByCategory(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := config.DownloaderConfig{URL: server.URL}
-	dl := download.NewQBittorrent("seedbox", cfg)
+	dl := download.NewQBittorrent(testDownloader("seedbox", server.URL))
 
 	// Filter by single category
 	downloads, err := dl.ListDownloads(t.Context(), []string{"tv"})
@@ -374,8 +256,7 @@ func TestQBittorrentListDownloads_FilterByMultipleCategories(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := config.DownloaderConfig{URL: server.URL}
-	dl := download.NewQBittorrent("seedbox", cfg)
+	dl := download.NewQBittorrent(testDownloader("seedbox", server.URL))
 
 	// Filter by multiple categories (client-side filtering)
 	downloads, err := dl.ListDownloads(t.Context(), []string{"tv", "movies"})
@@ -395,8 +276,7 @@ func TestQBittorrentListDownloads_Empty(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := config.DownloaderConfig{URL: server.URL}
-	dl := download.NewQBittorrent("seedbox", cfg)
+	dl := download.NewQBittorrent(testDownloader("seedbox", server.URL))
 
 	downloads, err := dl.ListDownloads(t.Context(), nil)
 	require.NoError(t, err)
@@ -430,8 +310,7 @@ func TestQBittorrentGetDownload(t *testing.T) {
 		}))
 		defer server.Close()
 
-		cfg := config.DownloaderConfig{URL: server.URL}
-		dl := download.NewQBittorrent("seedbox", cfg)
+		dl := download.NewQBittorrent(testDownloader("seedbox", server.URL))
 
 		d, err := dl.GetDownload(t.Context(), "abc123")
 		require.NoError(t, err)
@@ -449,8 +328,7 @@ func TestQBittorrentGetDownload(t *testing.T) {
 		}))
 		defer server.Close()
 
-		cfg := config.DownloaderConfig{URL: server.URL}
-		dl := download.NewQBittorrent("seedbox", cfg)
+		dl := download.NewQBittorrent(testDownloader("seedbox", server.URL))
 
 		d, err := dl.GetDownload(t.Context(), "nonexistent")
 		require.Error(t, err)
@@ -496,8 +374,7 @@ func TestQBittorrentGetFiles(t *testing.T) {
 		}))
 		defer server.Close()
 
-		cfg := config.DownloaderConfig{URL: server.URL}
-		dl := download.NewQBittorrent("seedbox", cfg)
+		dl := download.NewQBittorrent(testDownloader("seedbox", server.URL))
 
 		result, err := dl.GetFiles(t.Context(), "abc123")
 		require.NoError(t, err)
@@ -525,8 +402,7 @@ func TestQBittorrentGetFiles(t *testing.T) {
 		}))
 		defer server.Close()
 
-		cfg := config.DownloaderConfig{URL: server.URL}
-		dl := download.NewQBittorrent("seedbox", cfg)
+		dl := download.NewQBittorrent(testDownloader("seedbox", server.URL))
 
 		result, err := dl.GetFiles(t.Context(), "abc123")
 		require.NoError(t, err)
@@ -594,8 +470,7 @@ func TestTorrentStateMapping(t *testing.T) {
 			}))
 			defer server.Close()
 
-			cfg := config.DownloaderConfig{URL: server.URL}
-			dl := download.NewQBittorrent("seedbox", cfg)
+			dl := download.NewQBittorrent(testDownloader("seedbox", server.URL))
 
 			d, err := dl.GetDownload(t.Context(), "abc123")
 			require.NoError(t, err)
@@ -629,8 +504,7 @@ func TestTimestampHandling(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := config.DownloaderConfig{URL: server.URL}
-	dl := download.NewQBittorrent("seedbox", cfg)
+	dl := download.NewQBittorrent(testDownloader("seedbox", server.URL))
 
 	d, err := dl.GetDownload(t.Context(), "abc123")
 	require.NoError(t, err)
@@ -644,8 +518,7 @@ func TestTimestampHandling(t *testing.T) {
 
 func TestQBittorrentClose(t *testing.T) {
 	t.Run("CloseWithoutConnection", func(t *testing.T) {
-		cfg := config.DownloaderConfig{URL: "http://localhost:8080"}
-		dl := download.NewQBittorrent("seedbox", cfg)
+		dl := download.NewQBittorrent(testDownloader("seedbox", "http://localhost:8080"))
 
 		// Should not panic or error when closing without connecting
 		err := dl.Close()

@@ -6,8 +6,6 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-
-	"github.com/seedreap/seedreap/internal/config"
 )
 
 // configurable is implemented by all downloaders to support shared options.
@@ -33,6 +31,8 @@ const (
 	FileStateDownloading FileState = "downloading"
 	// FileStateComplete indicates the file has finished downloading.
 	FileStateComplete FileState = "complete"
+	// FileStateSkipped indicates the file is skipped and not being downloaded.
+	FileStateSkipped FileState = "skipped"
 )
 
 // TorrentState represents the overall state of a torrent/download.
@@ -93,8 +93,8 @@ type Download struct {
 	CompletedOn time.Time
 }
 
-// Downloader is the interface that download clients must implement.
-type Downloader interface {
+// Client is the interface that download clients must implement.
+type Client interface {
 	// Name returns the configured name of this downloader instance.
 	Name() string
 
@@ -109,42 +109,11 @@ type Downloader interface {
 
 	// ListDownloads returns all downloads matching the given categories.
 	// If categories is empty, returns all downloads.
-	ListDownloads(ctx context.Context, categories []string) ([]Download, error)
+	ListDownloads(ctx context.Context, categories []string) ([]*Download, error)
 
 	// GetDownload returns a specific download by ID/hash.
 	GetDownload(ctx context.Context, id string) (*Download, error)
 
 	// GetFiles returns the list of files for a download with current state.
 	GetFiles(ctx context.Context, id string) ([]File, error)
-
-	// SSHConfig returns the SSH configuration for this downloader.
-	SSHConfig() config.SSHConfig
-}
-
-// Registry holds all configured downloaders.
-type Registry struct {
-	downloaders map[string]Downloader
-}
-
-// NewRegistry creates a new downloader registry.
-func NewRegistry() *Registry {
-	return &Registry{
-		downloaders: make(map[string]Downloader),
-	}
-}
-
-// Register adds a downloader to the registry.
-func (r *Registry) Register(name string, d Downloader) {
-	r.downloaders[name] = d
-}
-
-// Get returns a downloader by name.
-func (r *Registry) Get(name string) (Downloader, bool) {
-	d, ok := r.downloaders[name]
-	return d, ok
-}
-
-// All returns all registered downloaders.
-func (r *Registry) All() map[string]Downloader {
-	return r.downloaders
 }

@@ -337,101 +337,9 @@ func (s *Syncer) Close() error {
 	return nil
 }
 
-// CreateSyncDownload creates a new sync download for tracking.
-func (s *Syncer) CreateSyncDownload(dl *download.Download, downloaderName, finalPath string) *SyncDownload {
-	s.downloadsMu.Lock()
-	defer s.downloadsMu.Unlock()
-
-	// Check if download already exists (keyed by downloader:id for uniqueness)
-	key := syncKey(downloaderName, dl.ID)
-	if sd, ok := s.downloads[key]; ok {
-		return sd
-	}
-
-	// Create per-download context for cancellation
-	ctx, cancel := context.WithCancel(context.Background())
-
-	sd := &SyncDownload{
-		ID:         dl.ID,
-		Name:       dl.Name,
-		Downloader: downloaderName,
-		Category:   dl.Category,
-		RemoteBase: dl.SavePath,
-		LocalBase:  filepath.Join(s.syncingPath, downloaderName, dl.ID),
-		FinalPath:  finalPath,
-		Status:     FileStatusPending,
-		ctx:        ctx,
-		cancel:     cancel,
-	}
-
-	// Create file progress entries
-	// Note: f.Path from qBittorrent includes the torrent folder name for multi-file torrents
-	// e.g., "TorrentName/file.mkv" - so we join with SavePath, not ContentPath
-	for _, f := range dl.Files {
-		if f.Priority == 0 {
-			continue // Skip files not selected for download
-		}
-
-		// Validate file paths to prevent path traversal attacks
-		remotePath, err := fileutil.SafeJoin(dl.SavePath, f.Path)
-		if err != nil {
-			s.logger.Warn().
-				Str("file", f.Path).
-				Err(err).
-				Msg("skipping file with invalid path")
-			continue
-		}
-		localPath, err := fileutil.SafeJoin(sd.LocalBase, f.Path)
-		if err != nil {
-			s.logger.Warn().
-				Str("file", f.Path).
-				Err(err).
-				Msg("skipping file with invalid path")
-			continue
-		}
-		finalFilePath, err := fileutil.SafeJoin(finalPath, f.Path)
-		if err != nil {
-			s.logger.Warn().
-				Str("file", f.Path).
-				Err(err).
-				Msg("skipping file with invalid path")
-			continue
-		}
-
-		fp := &FileProgress{
-			Path:       f.Path,
-			RemotePath: remotePath,
-			LocalPath:  localPath,
-			Size:       f.Size,
-			Status:     FileStatusPending,
-		}
-
-		// Check if file already exists at final destination with correct size
-		// This handles the case where a restart happens after sync but before cleanup
-		// Note: f.Path already includes the torrent name as the first component
-		if info, statErr := os.Stat(finalFilePath); statErr == nil && info.Size() == f.Size {
-			fp.Status = FileStatusSkipped
-			fp.Transferred = f.Size
-			s.logger.Debug().
-				Str("file", f.Path).
-				Str("final_path", finalFilePath).
-				Msg("file already exists at final destination, marking as skipped")
-		} else if f.State != download.FileStateComplete {
-			// If file is not yet complete in download, mark as pending
-			fp.Status = FileStatusPending
-		}
-
-		sd.Files = append(sd.Files, fp)
-		sd.TotalSize += f.Size
-		sd.TotalFiles++
-	}
-
-	s.downloads[key] = sd
-	return sd
-}
-
-// GetByKey returns a sync download by downloader name and download ID.
-func (s *Syncer) GetByKey(downloaderName, downloadID string) (*SyncDownload, bool) {
+// GetSyncDownload returns a sync download by downloader name and download ID.
+// This returns the concrete *SyncDownload type for internal use by handlers.
+func (s *Syncer) GetSyncDownload(downloaderName, downloadID string) (*SyncDownload, bool) {
 	s.downloadsMu.RLock()
 	defer s.downloadsMu.RUnlock()
 
@@ -492,7 +400,7 @@ func (s *Syncer) GetAggregateSpeed() int64 {
 // SyncFile syncs a single file from remote to local.
 //
 //nolint:funlen // file sync requires multiple phases
-func (s *Syncer) SyncFile(ctx context.Context, _ download.Downloader, sd *SyncDownload, file *FileProgress) error {
+func (s *Syncer) SyncFile(ctx context.Context, _ download.Client, sd *SyncDownload, file *FileProgress) error {
 	// Acquire semaphore
 	select {
 	case s.semaphore <- struct{}{}:
@@ -536,9 +444,18 @@ func (s *Syncer) SyncFile(ctx context.Context, _ download.Downloader, sd *SyncDo
 			file.Transferred = file.Size
 			file.CompletedAt = time.Now()
 			file.mu.Unlock()
-			s.logger.Debug().Str("file", file.Path).Msg("file already exists, skipping")
+			s.logger.Info().
+				Str("file", file.Path).
+				Str("local_path", file.LocalPath).
+				Int64("size", file.Size).
+				Msg("file already exists in staging with correct size, marking as skipped")
 			return nil
 		}
+		s.logger.Debug().
+			Str("file", file.Path).
+			Int64("existing_size", info.Size()).
+			Int64("expected_size", file.Size).
+			Msg("file exists but size mismatch, will re-transfer")
 	}
 
 	// Transfer the file using the configured backend
@@ -584,6 +501,7 @@ func (s *Syncer) SyncFile(ctx context.Context, _ download.Downloader, sd *SyncDo
 
 	// Update final status
 	file.mu.Lock()
+	previousStatus := file.Status
 	file.Status = FileStatusComplete
 	file.Transferred = file.Size
 	file.CompletedAt = time.Now()
@@ -592,6 +510,14 @@ func (s *Syncer) SyncFile(ctx context.Context, _ download.Downloader, sd *SyncDo
 		file.BytesPerSec = int64(float64(file.Transferred) / elapsed)
 	}
 	file.mu.Unlock()
+
+	s.logger.Debug().
+		Str("file", file.Path).
+		Str("previous_status", string(previousStatus)).
+		Str("new_status", string(FileStatusComplete)).
+		Int64("transferred", file.Size).
+		Int64("size", file.Size).
+		Msg("file status updated to complete")
 
 	s.logger.Info().
 		Str("download", sd.ID).
@@ -603,142 +529,6 @@ func (s *Syncer) SyncFile(ctx context.Context, _ download.Downloader, sd *SyncDo
 	// Trigger callback
 	if s.onFileComplete != nil {
 		s.onFileComplete(sd, file)
-	}
-
-	return nil
-}
-
-// Sync syncs all ready files for a download.
-//
-//nolint:gocognit,funlen // sync logic requires multiple phases and error handling paths
-func (s *Syncer) Sync(ctx context.Context, dl download.Downloader, sd *SyncDownload) error {
-	// Check if download sync is already cancelled
-	if sd.IsCancelled() {
-		return context.Canceled
-	}
-
-	// Use the download's context for cancellation, but also respect the parent context
-	// Create a merged context that cancels if either is cancelled
-	sdCtx := sd.Context()
-	mergedCtx, mergedCancel := context.WithCancel(ctx)
-	defer mergedCancel()
-
-	// Watch for download sync cancellation
-	go func() {
-		select {
-		case <-sdCtx.Done():
-			mergedCancel()
-		case <-mergedCtx.Done():
-		}
-	}()
-
-	sd.mu.Lock()
-	sd.Status = FileStatusSyncing
-	sd.StartedAt = time.Now()
-	sd.mu.Unlock()
-
-	backendName := "unknown"
-	if s.transferer != nil {
-		backendName = s.transferer.Name()
-	}
-
-	s.logger.Info().
-		Str("id", sd.ID).
-		Str("name", sd.Name).
-		Int("files", sd.TotalFiles).
-		Str("backend", backendName).
-		Msg("starting download sync")
-
-	// Get current file states from downloader
-	files, err := dl.GetFiles(mergedCtx, sd.ID)
-	if err != nil {
-		return fmt.Errorf("failed to get file states: %w", err)
-	}
-
-	// Build a map for quick lookup
-	fileStates := make(map[string]download.FileState)
-	for _, f := range files {
-		fileStates[f.Path] = f.State
-	}
-
-	// Sync files that are complete in the download
-	var wg sync.WaitGroup
-	errChan := make(chan error, len(sd.Files))
-
-	for _, file := range sd.Files {
-		// Check if file is complete in downloader
-		if state, ok := fileStates[file.Path]; ok && state != download.FileStateComplete {
-			s.logger.Debug().
-				Str("file", file.Path).
-				Str("state", string(state)).
-				Msg("file not yet complete in downloader, skipping")
-			continue
-		}
-
-		// Skip already synced files
-		file.mu.RLock()
-		status := file.Status
-		file.mu.RUnlock()
-
-		if status == FileStatusComplete || status == FileStatusSkipped {
-			continue
-		}
-
-		wg.Add(1)
-		go func(f *FileProgress) {
-			defer wg.Done()
-			if syncErr := s.SyncFile(mergedCtx, dl, sd, f); syncErr != nil {
-				errChan <- fmt.Errorf("file %s: %w", f.Path, syncErr)
-			}
-		}(file)
-	}
-
-	wg.Wait()
-	close(errChan)
-
-	// Check for errors
-	var syncErrors []error
-	for err := range errChan {
-		s.logger.Error().Err(err).Str("download", sd.ID).Msg("file sync error")
-		syncErrors = append(syncErrors, err)
-	}
-
-	// Check if all files are complete
-	allComplete := true
-	for _, f := range sd.Files {
-		f.mu.RLock()
-		status := f.Status
-		f.mu.RUnlock()
-
-		if status != FileStatusComplete && status != FileStatusSkipped {
-			allComplete = false
-			break
-		}
-	}
-
-	sd.mu.Lock()
-	switch {
-	case len(syncErrors) > 0:
-		sd.Status = FileStatusError
-		sd.Error = fmt.Errorf("sync errors: %v", syncErrors)
-	case allComplete:
-		sd.Status = FileStatusComplete
-		sd.CompletedAt = time.Now()
-	default:
-		// Some files still pending (not yet complete in downloader)
-		sd.Status = FileStatusPending
-	}
-	sd.mu.Unlock()
-
-	if allComplete {
-		s.logger.Info().
-			Str("id", sd.ID).
-			Str("name", sd.Name).
-			Msg("download sync complete")
-
-		if s.onSyncComplete != nil {
-			s.onSyncComplete(sd)
-		}
 	}
 
 	return nil
@@ -835,4 +625,124 @@ func (s *Syncer) RemoveByKey(downloaderName, downloadID string) {
 	s.downloadsMu.Lock()
 	defer s.downloadsMu.Unlock()
 	delete(s.downloads, syncKey(downloaderName, downloadID))
+}
+
+// RegisterDownload registers a new download for tracking live transfer progress.
+// This is called by the Controller when a sync job starts.
+func (s *Syncer) RegisterDownload(downloaderName, downloadID, name string) *SyncDownload {
+	s.downloadsMu.Lock()
+	defer s.downloadsMu.Unlock()
+
+	key := syncKey(downloaderName, downloadID)
+	if sd, exists := s.downloads[key]; exists {
+		return sd
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	sd := &SyncDownload{
+		ID:         downloadID,
+		Name:       name,
+		Downloader: downloaderName,
+		Files:      make([]*FileProgress, 0),
+		Status:     FileStatusPending,
+		StartedAt:  time.Now(),
+		ctx:        ctx,
+		cancel:     cancel,
+	}
+	s.downloads[key] = sd
+	return sd
+}
+
+// RegisterFile adds a file to a sync download for progress tracking.
+// Returns the FileProgress for updating during transfer.
+func (s *Syncer) RegisterFile(
+	downloaderName, downloadID, filePath string,
+	fileSize int64,
+) *FileProgress {
+	s.downloadsMu.Lock()
+	defer s.downloadsMu.Unlock()
+
+	key := syncKey(downloaderName, downloadID)
+	sd, ok := s.downloads[key]
+	if !ok {
+		return nil
+	}
+
+	// Check if file already registered
+	for _, f := range sd.Files {
+		if f.Path == filePath {
+			return f
+		}
+	}
+
+	fp := &FileProgress{
+		Path:   filePath,
+		Size:   fileSize,
+		Status: FileStatusPending,
+	}
+	sd.Files = append(sd.Files, fp)
+	sd.TotalSize += fileSize
+	sd.TotalFiles++
+
+	return fp
+}
+
+// UpdateFileStatus updates a file's status in the live tracking.
+func (s *Syncer) UpdateFileStatus(
+	downloaderName, downloadID, filePath string,
+	status FileStatus,
+) {
+	s.downloadsMu.RLock()
+	defer s.downloadsMu.RUnlock()
+
+	key := syncKey(downloaderName, downloadID)
+	sd, ok := s.downloads[key]
+	if !ok {
+		return
+	}
+
+	for _, f := range sd.Files {
+		if f.Path == filePath {
+			f.mu.Lock()
+			f.Status = status
+			switch status {
+			case FileStatusSyncing:
+				f.StartedAt = time.Now()
+			case FileStatusComplete, FileStatusSkipped:
+				f.CompletedAt = time.Now()
+				f.Transferred = f.Size
+			case FileStatusPending, FileStatusError:
+				// No special handling needed for these statuses
+			}
+			f.mu.Unlock()
+			return
+		}
+	}
+}
+
+// MarkDownloadSyncing marks a download as actively syncing.
+func (s *Syncer) MarkDownloadSyncing(downloaderName, downloadID string) {
+	s.downloadsMu.RLock()
+	defer s.downloadsMu.RUnlock()
+
+	key := syncKey(downloaderName, downloadID)
+	if sd, ok := s.downloads[key]; ok {
+		sd.mu.Lock()
+		sd.Status = FileStatusSyncing
+		sd.mu.Unlock()
+	}
+}
+
+// MarkDownloadComplete marks a download as complete.
+func (s *Syncer) MarkDownloadComplete(downloaderName, downloadID string) {
+	s.downloadsMu.RLock()
+	defer s.downloadsMu.RUnlock()
+
+	key := syncKey(downloaderName, downloadID)
+	if sd, ok := s.downloads[key]; ok {
+		sd.mu.Lock()
+		sd.Status = FileStatusComplete
+		sd.CompletedAt = time.Now()
+		sd.mu.Unlock()
+	}
 }

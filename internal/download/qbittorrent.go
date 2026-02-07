@@ -14,17 +14,16 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/seedreap/seedreap/internal/config"
+	"github.com/seedreap/seedreap/internal/ent/generated"
 )
 
-// qbittorrentClient implements the Downloader interface for qBittorrent.
-// It is private and only exposed via the Downloader interface.
+// qbittorrentClient implements the Client interface for qBittorrent.
+// It is private and only exposed via the Client interface.
 type qbittorrentClient struct {
 	name       string
 	baseURL    string
 	username   string
 	password   string
-	sshConfig  config.SSHConfig
 	httpClient *http.Client
 	logger     zerolog.Logger
 }
@@ -64,19 +63,18 @@ func (c *qbittorrentClient) setLogger(logger zerolog.Logger) {
 	c.logger = logger
 }
 
-// NewQBittorrent creates a new qBittorrent client and returns it as Downloader.
-func NewQBittorrent(name string, cfg config.DownloaderConfig, opts ...Option) Downloader {
+// NewQBittorrent creates a new qBittorrent client and returns it as Client.
+func NewQBittorrent(d *generated.DownloadClient, opts ...Option) Client {
 	jar, _ := cookiejar.New(nil)
 
 	c := &qbittorrentClient{
-		name:      name,
-		baseURL:   strings.TrimSuffix(cfg.URL, "/"),
-		username:  cfg.Username,
-		password:  cfg.Password,
-		sshConfig: cfg.SSH,
+		name:     d.Name,
+		baseURL:  strings.TrimSuffix(d.URL, "/"),
+		username: d.Username,
+		password: d.Password,
 		httpClient: &http.Client{
 			Jar:     jar,
-			Timeout: cfg.HTTPTimeout,
+			Timeout: time.Duration(d.HTTPTimeout) * time.Second,
 		},
 		logger: zerolog.Nop(),
 	}
@@ -96,11 +94,6 @@ func (c *qbittorrentClient) Name() string {
 // Type returns the type of download.
 func (c *qbittorrentClient) Type() string {
 	return "qbittorrent"
-}
-
-// SSHConfig returns the SSH configuration.
-func (c *qbittorrentClient) SSHConfig() config.SSHConfig {
-	return c.sshConfig
 }
 
 // Connect establishes a connection to the qBittorrent API.
@@ -181,7 +174,7 @@ func (c *qbittorrentClient) login(ctx context.Context) error {
 }
 
 // ListDownloads returns all torrents matching the given categories.
-func (c *qbittorrentClient) ListDownloads(ctx context.Context, categories []string) ([]Download, error) {
+func (c *qbittorrentClient) ListDownloads(ctx context.Context, categories []string) ([]*Download, error) {
 	params := url.Values{}
 	if len(categories) == 1 {
 		params.Set("category", categories[0])
@@ -209,7 +202,7 @@ func (c *qbittorrentClient) ListDownloads(ctx context.Context, categories []stri
 		categorySet[cat] = true
 	}
 
-	var downloads []Download
+	var downloads []*Download
 	for _, t := range torrents {
 		if len(categories) > 1 && !categorySet[t.Category] {
 			continue
@@ -246,8 +239,7 @@ func (c *qbittorrentClient) GetDownload(ctx context.Context, id string) (*Downlo
 		return nil, fmt.Errorf("torrent not found: %s", id)
 	}
 
-	d := c.toDownload(torrents[0])
-	return &d, nil
+	return c.toDownload(torrents[0]), nil
 }
 
 // GetFiles returns the files for a torrent.
@@ -275,11 +267,18 @@ func (c *qbittorrentClient) GetFiles(ctx context.Context, id string) ([]File, er
 
 	result := make([]File, len(files))
 	for i, f := range files {
-		downloaded := int64(float64(f.Size) * f.Progress)
-		state := FileStateDownloading
-		if f.Progress >= 1.0 {
+		var state FileState
+
+		switch {
+		case f.Priority == 0:
+			state = FileStateSkipped
+		case f.Progress >= 1.0:
 			state = FileStateComplete
+		default:
+			state = FileStateDownloading
 		}
+
+		downloaded := int64(f.Progress * float64(f.Size))
 
 		result[i] = File{
 			Path:       f.Name,
@@ -293,7 +292,7 @@ func (c *qbittorrentClient) GetFiles(ctx context.Context, id string) ([]File, er
 	return result, nil
 }
 
-func (c *qbittorrentClient) toDownload(t qbittorrentAPITorrent) Download {
+func (c *qbittorrentClient) toDownload(t qbittorrentAPITorrent) *Download {
 	state := TorrentStateDownloading
 
 	switch t.State {
@@ -319,7 +318,7 @@ func (c *qbittorrentClient) toDownload(t qbittorrentAPITorrent) Download {
 		completedOn = time.Unix(t.CompletionOn, 0)
 	}
 
-	return Download{
+	return &Download{
 		ID:          t.Hash,
 		Name:        t.Name,
 		Hash:        t.Hash,

@@ -72,13 +72,11 @@ export const stats = {
     error: 0,
 };
 
-// Apps and downloaders (from API)
+// Apps, downloaders, and events (from API)
 export const appsList = [];
 export const downloadersList = [];
-
-// Timeline state
-export const timeline = {
-    events: [],
+export const eventsList = {
+    items: [],
     loading: false,
     filter: '', // Filter by event type, app, downloader, or download
 };
@@ -94,15 +92,24 @@ export const filters = {
 
 // Status order for sorting (lower = earlier in workflow)
 export const jobStatusOrder = {
-    downloading: 0,
+    discovered: 0,
     paused: 1,
-    discovered: 2,
+    downloading: 2,
     pending: 3,
     syncing: 4,
-    importing: 5,
-    complete: 6,
-    skipped: 7,
-    error: 8
+    synced: 5,
+    move_pending: 6,
+    moving: 7,
+    moved: 8,
+    importing: 9,
+    imported: 10,
+    complete: 11,
+    skipped: 12,
+    cancelled: 13,
+    sync_error: 14,
+    move_error: 15,
+    import_error: 16,
+    error: 17
 };
 
 export const fileStatusOrder = {
@@ -307,4 +314,3 @@ export function getFilteredJobs(jobList) {
         return true;
     });
 }
-

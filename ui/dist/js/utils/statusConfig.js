@@ -7,9 +7,18 @@ export const jobStatusConfig = {
     discovered: { label: 'Discovered', badgeClass: 'badge-accent', progressClass: 'progress-primary', tooltip: 'Discovered, waiting to sync' },
     pending: { label: 'Pending', badgeClass: 'badge-ghost', progressClass: 'progress-primary', tooltip: 'Pending sync' },
     syncing: { label: 'Syncing', badgeClass: 'badge-warning', progressClass: 'progress-warning', tooltip: 'Syncing files from seedbox' },
+    synced: { label: 'Synced', badgeClass: 'badge-info', progressClass: 'progress-info', tooltip: 'Files synced, waiting to move' },
+    move_pending: { label: 'Move Pending', badgeClass: 'badge-ghost', progressClass: 'progress-primary', tooltip: 'Waiting to move to final location' },
+    moving: { label: 'Moving', badgeClass: 'badge-secondary', progressClass: 'progress-secondary', tooltip: 'Moving to final location' },
+    moved: { label: 'Moved', badgeClass: 'badge-info', progressClass: 'progress-info', tooltip: 'Moved, waiting for import' },
     importing: { label: 'Importing', badgeClass: 'badge-secondary', progressClass: 'progress-primary', tooltip: 'Triggering import in app' },
+    imported: { label: 'Imported', badgeClass: 'badge-success', progressClass: 'progress-success', tooltip: 'Successfully imported by app' },
     complete: { label: 'Complete', badgeClass: 'badge-success', progressClass: 'progress-success', tooltip: 'Fully synced and imported' },
     skipped: { label: 'Skipped', badgeClass: 'badge-ghost', progressClass: 'progress-primary', tooltip: 'Skipped' },
+    cancelled: { label: 'Cancelled', badgeClass: 'badge-ghost', progressClass: 'progress-primary', tooltip: 'Sync cancelled' },
+    sync_error: { label: 'Sync Error', badgeClass: 'badge-error', progressClass: 'progress-error', tooltip: 'Sync failed' },
+    move_error: { label: 'Move Error', badgeClass: 'badge-error', progressClass: 'progress-error', tooltip: 'Move failed' },
+    import_error: { label: 'Import Error', badgeClass: 'badge-error', progressClass: 'progress-error', tooltip: 'Import failed' },
     error: { label: 'Error', badgeClass: 'badge-error', progressClass: 'progress-error', tooltip: 'Error occurred' }
 };
 

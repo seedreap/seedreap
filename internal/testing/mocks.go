@@ -8,20 +8,33 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"testing"
 
-	"github.com/seedreap/seedreap/internal/config"
+	_ "github.com/mattn/go-sqlite3" // Required for SQLite database driver in tests.
+
 	"github.com/seedreap/seedreap/internal/download"
+	"github.com/seedreap/seedreap/internal/ent/generated"
+	"github.com/seedreap/seedreap/internal/ent/generated/enttest"
+	_ "github.com/seedreap/seedreap/internal/ent/generated/runtime" // Required for hooks and interceptors (soft-delete).
 	"github.com/seedreap/seedreap/internal/transfer"
 )
+
+// NewTestDB creates an in-memory Ent database for testing.
+// The database is automatically closed when the test completes.
+func NewTestDB(t *testing.T) *generated.Client {
+	t.Helper()
+	db := enttest.Open(t, "sqlite3", "file:ent?mode=memory&_fk=1")
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
 
 // ErrNotFound is returned when a download is not found.
 var ErrNotFound = errors.New("download not found")
 
-// MockDownloader is a mock implementation of download.Downloader for testing.
-type MockDownloader struct {
-	name      string
-	dlType    string
-	sshConfig config.SSHConfig
+// MockDownloadClient is a mock implementation of download.Downloader for testing.
+type MockDownloadClient struct {
+	name   string
+	dlType string
 
 	mu        sync.RWMutex
 	downloads map[string]*download.Download
@@ -29,14 +42,14 @@ type MockDownloader struct {
 
 	// Hooks for custom behavior
 	OnConnect       func(ctx context.Context) error
-	OnListDownloads func(ctx context.Context, categories []string) ([]download.Download, error)
+	OnListDownloads func(ctx context.Context, categories []string) ([]*download.Download, error)
 	OnGetDownload   func(ctx context.Context, id string) (*download.Download, error)
 	OnGetFiles      func(ctx context.Context, id string) ([]download.File, error)
 }
 
-// NewMockDownloader creates a new mock download.
-func NewMockDownloader(name string) *MockDownloader {
-	return &MockDownloader{
+// NewMockDownloadClient creates a new mock download.
+func NewMockDownloadClient(name string) *MockDownloadClient {
+	return &MockDownloadClient{
 		name:      name,
 		dlType:    "mock",
 		downloads: make(map[string]*download.Download),
@@ -45,17 +58,17 @@ func NewMockDownloader(name string) *MockDownloader {
 }
 
 // Name returns the configured name.
-func (m *MockDownloader) Name() string {
+func (m *MockDownloadClient) Name() string {
 	return m.name
 }
 
 // Type returns the downloader type.
-func (m *MockDownloader) Type() string {
+func (m *MockDownloadClient) Type() string {
 	return m.dlType
 }
 
 // Connect establishes a connection (no-op for mock).
-func (m *MockDownloader) Connect(ctx context.Context) error {
+func (m *MockDownloadClient) Connect(ctx context.Context) error {
 	if m.OnConnect != nil {
 		return m.OnConnect(ctx)
 	}
@@ -63,12 +76,12 @@ func (m *MockDownloader) Connect(ctx context.Context) error {
 }
 
 // Close closes the connection (no-op for mock).
-func (m *MockDownloader) Close() error {
+func (m *MockDownloadClient) Close() error {
 	return nil
 }
 
 // ListDownloads returns downloads matching the given categories.
-func (m *MockDownloader) ListDownloads(ctx context.Context, categories []string) ([]download.Download, error) {
+func (m *MockDownloadClient) ListDownloads(ctx context.Context, categories []string) ([]*download.Download, error) {
 	if m.OnListDownloads != nil {
 		return m.OnListDownloads(ctx, categories)
 	}
@@ -81,18 +94,18 @@ func (m *MockDownloader) ListDownloads(ctx context.Context, categories []string)
 		categorySet[c] = true
 	}
 
-	var result []download.Download
+	var result []*download.Download
 	for _, dl := range m.downloads {
 		// If no categories specified, return all; otherwise filter
 		if len(categories) == 0 || categorySet[dl.Category] {
-			result = append(result, *dl)
+			result = append(result, dl)
 		}
 	}
 	return result, nil
 }
 
 // GetDownload returns a specific download by ID.
-func (m *MockDownloader) GetDownload(ctx context.Context, id string) (*download.Download, error) {
+func (m *MockDownloadClient) GetDownload(ctx context.Context, id string) (*download.Download, error) {
 	if m.OnGetDownload != nil {
 		return m.OnGetDownload(ctx, id)
 	}
@@ -108,7 +121,7 @@ func (m *MockDownloader) GetDownload(ctx context.Context, id string) (*download.
 }
 
 // GetFiles returns the files for a download.
-func (m *MockDownloader) GetFiles(ctx context.Context, id string) ([]download.File, error) {
+func (m *MockDownloadClient) GetFiles(ctx context.Context, id string) ([]download.File, error) {
 	if m.OnGetFiles != nil {
 		return m.OnGetFiles(ctx, id)
 	}
@@ -123,13 +136,8 @@ func (m *MockDownloader) GetFiles(ctx context.Context, id string) ([]download.Fi
 	return files, nil
 }
 
-// SSHConfig returns the SSH configuration.
-func (m *MockDownloader) SSHConfig() config.SSHConfig {
-	return m.sshConfig
-}
-
 // AddDownload adds a download to the mock.
-func (m *MockDownloader) AddDownload(dl *download.Download, files []download.File) {
+func (m *MockDownloadClient) AddDownload(dl *download.Download, files []download.File) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -138,7 +146,7 @@ func (m *MockDownloader) AddDownload(dl *download.Download, files []download.Fil
 }
 
 // RemoveDownload removes a download from the mock.
-func (m *MockDownloader) RemoveDownload(id string) {
+func (m *MockDownloadClient) RemoveDownload(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -147,7 +155,7 @@ func (m *MockDownloader) RemoveDownload(id string) {
 }
 
 // UpdateDownload updates a download in the mock.
-func (m *MockDownloader) UpdateDownload(dl *download.Download) {
+func (m *MockDownloadClient) UpdateDownload(dl *download.Download) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -155,12 +163,35 @@ func (m *MockDownloader) UpdateDownload(dl *download.Download) {
 }
 
 // SetCategory changes a download's category.
-func (m *MockDownloader) SetCategory(id, category string) {
+func (m *MockDownloadClient) SetCategory(id, category string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if dl, ok := m.downloads[id]; ok {
 		dl.Category = category
+	}
+}
+
+// UpdateFiles updates the files for a download.
+func (m *MockDownloadClient) UpdateFiles(id string, files []download.File) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.files[id] = files
+	// Also update the download's embedded files if present
+	if dl, ok := m.downloads[id]; ok {
+		dl.Files = files
+	}
+}
+
+// UpdateDownloadState updates a download's state and progress.
+func (m *MockDownloadClient) UpdateDownloadState(id string, state download.TorrentState, progress float64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if dl, ok := m.downloads[id]; ok {
+		dl.State = state
+		dl.Progress = progress
 	}
 }
 
