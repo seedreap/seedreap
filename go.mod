@@ -1,10 +1,10 @@
 module github.com/seedreap/seedreap
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/labstack/echo/v4 v4.15.1
-	github.com/rclone/rclone v1.73.1
+	github.com/rclone/rclone v1.73.2
 	github.com/rs/zerolog v1.34.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
@@ -108,7 +108,7 @@ require (
 	go.opentelemetry.io/proto/otlp v1.9.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/net v0.49.0 // indirect
+	golang.org/x/net v0.51.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/term v0.40.0 // indirect
