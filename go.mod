@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/labstack/echo/v4 v4.15.1
-	github.com/rclone/rclone v1.73.3
+	github.com/rclone/rclone v1.73.5
 	github.com/rs/zerolog v1.34.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
