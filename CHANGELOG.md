@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.2.0](https://github.com/seedreap/seedreap/compare/v0.1.0...v0.2.0) (2026-07-04)
+
+
+### Features
+
+* remove old ssh connection and other dead code ([#24](https://github.com/seedreap/seedreap/issues/24)) ([a25a189](https://github.com/seedreap/seedreap/commit/a25a18911bd7ad290b8266f73223e05f585f9a2c))
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/labstack/echo/v4 to v4.15.1 ([#46](https://github.com/seedreap/seedreap/issues/46)) ([7c92a95](https://github.com/seedreap/seedreap/commit/7c92a95a243d2e075d5e43f6f05685c38cdb65ff))
+* **deps:** update module github.com/labstack/echo/v4 to v4.15.2 ([#65](https://github.com/seedreap/seedreap/issues/65)) ([0d4c935](https://github.com/seedreap/seedreap/commit/0d4c935ee3f577bafa2eb93735db68285d216b54))
+* **deps:** update module github.com/rclone/rclone to v1.72.1 ([#29](https://github.com/seedreap/seedreap/issues/29)) ([4112eaf](https://github.com/seedreap/seedreap/commit/4112eaf99a3fe3b7629c9d6a34d6358d2183b0b8))
+* **deps:** update module github.com/rclone/rclone to v1.73.0 ([#38](https://github.com/seedreap/seedreap/issues/38)) ([888ef4e](https://github.com/seedreap/seedreap/commit/888ef4ef5350655272831f6723186c57d01ca6a4))
+* **deps:** update module github.com/rclone/rclone to v1.73.1 ([#45](https://github.com/seedreap/seedreap/issues/45)) ([a25796e](https://github.com/seedreap/seedreap/commit/a25796eadb69b4367077fbb309375998fea755e7))
+* **deps:** update module github.com/rclone/rclone to v1.73.2 ([#54](https://github.com/seedreap/seedreap/issues/54)) ([020e120](https://github.com/seedreap/seedreap/commit/020e120b61dce223ffb8bd0c495756a81c5cd4af))
+* **deps:** update module github.com/rclone/rclone to v1.73.3 ([#57](https://github.com/seedreap/seedreap/issues/57)) ([1446b1b](https://github.com/seedreap/seedreap/commit/1446b1bab0d92b2045ffc90fda5a7ca73bb5adc6))
+* **deps:** update module github.com/rclone/rclone to v1.73.5 ([#62](https://github.com/seedreap/seedreap/issues/62)) ([bf391f4](https://github.com/seedreap/seedreap/commit/bf391f49c895add35dafff81a7ede44d0f10c554))
+* **deps:** update module github.com/rclone/rclone to v1.74.1 ([#66](https://github.com/seedreap/seedreap/issues/66)) ([ca13bc3](https://github.com/seedreap/seedreap/commit/ca13bc3e81e3f9d30c81da6aef38acf9fe58fc0b))
+* **deps:** update module github.com/rclone/rclone to v1.74.3 ([#71](https://github.com/seedreap/seedreap/issues/71)) ([20dd5ce](https://github.com/seedreap/seedreap/commit/20dd5ce7df17217e3098a719f2215371f78f69cc))
+* **deps:** update module github.com/rs/zerolog to v1.35.1 ([#63](https://github.com/seedreap/seedreap/issues/63)) ([576b284](https://github.com/seedreap/seedreap/commit/576b2847425c42e434578379538810c3213570dc))
+* **deps:** update module github.com/testcontainers/testcontainers-go to v0.41.0 ([#55](https://github.com/seedreap/seedreap/issues/55)) ([43352e3](https://github.com/seedreap/seedreap/commit/43352e365fe7ea2722c8459b62b64eaacfe79775))
+* **deps:** update module golang.org/x/crypto to v0.46.0 ([#26](https://github.com/seedreap/seedreap/issues/26)) ([37d388e](https://github.com/seedreap/seedreap/commit/37d388e9023ed68cefa45c3b0c826ace7b674524))
+* **deps:** update module golang.org/x/crypto to v0.47.0 ([#33](https://github.com/seedreap/seedreap/issues/33)) ([2ef80e1](https://github.com/seedreap/seedreap/commit/2ef80e1b459f04aa217c764718c050ee874aab10))
+* **deps:** update module golang.org/x/crypto to v0.48.0 ([#40](https://github.com/seedreap/seedreap/issues/40)) ([2159d6b](https://github.com/seedreap/seedreap/commit/2159d6b2eb6c8ff739223e5606e5e9a863ec6d77))
+* **deps:** update module golang.org/x/crypto to v0.49.0 ([#56](https://github.com/seedreap/seedreap/issues/56)) ([b2da268](https://github.com/seedreap/seedreap/commit/b2da268ce342339af5e9f455c1fa60d3cb99f91f))
+* **deps:** update module golang.org/x/crypto to v0.51.0 ([#67](https://github.com/seedreap/seedreap/issues/67)) ([bb9199c](https://github.com/seedreap/seedreap/commit/bb9199cf1ae3692f98d369a5014af9865d581087))
+* **deps:** update module golang.org/x/crypto to v0.53.0 ([#72](https://github.com/seedreap/seedreap/issues/72)) ([4228a32](https://github.com/seedreap/seedreap/commit/4228a3284bf8b9b25c1e8c42e6cbd82f5b50ef41))
+
 ## 0.1.0 (2025-12-05)
 
 
